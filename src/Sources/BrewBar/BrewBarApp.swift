@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.10"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.11"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -215,7 +215,10 @@ struct Dashboard: View {
                 }.foregroundStyle(.secondary)
                 Spacer()
                 if !model.ready && !model.busy { Button("Retry") { model.prepare() } }
-                Text(model.busy ? "Safe to close this panel" : "One command at a time").font(.system(size: 10)).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(model.busy ? "Safe to close this panel" : "One command at a time").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("MIT License · © 2026 Ahmad Farid Abbas").font(.system(size: 9)).foregroundStyle(.tertiary)
+                }
             }
         }.padding(20).frame(width: 550).background(.regularMaterial)
         .onChange(of: colorScheme) { scheme in NSApp.applicationIconImage = BrandImages.icon(dark: scheme == .dark) }

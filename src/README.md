@@ -131,3 +131,9 @@ Long-running commands (Update, Upgrade, Cleanup, and per-package upgrades) now r
 `CommandRunner` gained a PTY path (`openpty` + `POSIX_SPAWN_SETSID`); the child's own session makes the slave its controlling terminal, and group-directed signals still reach it for Stop/cancel. JSON captures (installed/updates lists) stay on the plain pipe for clean, parseable output. The console model now honours carriage returns as in-place line rewrites, so the `####  100%` bar updates a single line instead of flooding the log — keeping both the live view and the Copy output clean. Downloads run sequentially (`HOMEBREW_DOWNLOAD_CONCURRENCY=1`) so brew prints the single-line progress bar rather than the newer multi-line animated parallel-download spinner, which a plain-text scrollback console cannot render. `TERM` is set to `xterm-256color` with colour disabled and stray escape codes stripped.
 
 Optimized arm64 build verified; the built bundle reports version 1.10 (build 11).
+
+## Version 1.11: MIT license
+
+BrewBar is now released under the MIT License (a `LICENSE` file at the repository root; GitHub detects it as MIT). The panel footer shows a small `MIT License · © 2026 Ahmad Farid Abbas` line beneath the "One command at a time" status, and the website footer links the license.
+
+Optimized arm64 build verified; the built bundle reports version 1.11 (build 12).
