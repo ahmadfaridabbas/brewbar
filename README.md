@@ -44,3 +44,5 @@ See [PUBLISHING.md](PUBLISHING.md) for how the repository and website are struct
 ## Status & licensing
 
 BrewBar is an independent project and is not affiliated with or endorsed by Homebrew. It runs the `brew` binary already installed on your Mac. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+BrewBar is released under the [MIT License](LICENSE). Copyright (c) 2026 Ahmad Farid Abbas.
