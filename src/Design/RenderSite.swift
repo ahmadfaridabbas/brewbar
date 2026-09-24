@@ -4,6 +4,10 @@
 // These are native offscreen renders, not screen captures.
 import AppKit
 
+// Directory holding the real app icon artwork (AppIconLight.png / AppIconDark.png).
+// Pass as argv[2]; defaults to the project's Resources folder.
+let resourcesDir = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "Resources"
+
 // MARK: - Palette
 
 struct Theme {
@@ -271,19 +275,19 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
 }
 
 func drawAppIcon(_ rect: NSRect, _ t: Theme) {
-    let tile = NSBezierPath(roundedRect: rect, xRadius: rect.width*0.22, yRadius: rect.width*0.22)
-    NSGradient(starting: c(0x10232E), ending: c(0x315465))!.draw(in: tile, angle: 75)
-    let s = rect.width / 1024
-    func P(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x*s, y: rect.minY + y*s) }
-    let handle = NSBezierPath(roundedRect: NSRect(x: rect.minX + 644*s, y: rect.minY + 333*s, width: 182*s, height: 235*s), xRadius: 84*s, yRadius: 84*s)
-    handle.lineWidth = 59*s; c(0xFFD38B).setStroke(); handle.stroke()
-    let mug = NSBezierPath()
-    mug.move(to: P(239, 611)); mug.line(to: P(697, 611)); mug.line(to: P(683, 338))
-    mug.curve(to: P(579, 239), controlPoint1: P(680, 270), controlPoint2: P(640, 239))
-    mug.line(to: P(359, 239))
-    mug.curve(to: P(253, 338), controlPoint1: P(292, 239), controlPoint2: P(256, 272))
-    mug.close()
-    NSGradient(starting: c(0xE99A3C), ending: c(0xFFE0A6))!.draw(in: mug, angle: 90)
+    // Use the real bundled app icon artwork (light/dark variants).
+    let name = t.dark ? "AppIconDark" : "AppIconLight"
+    let path = "\(resourcesDir)/\(name).png"
+    if let img = NSImage(contentsOfFile: path) {
+        // Clip to a rounded square so it reads like an app icon in the header.
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: rect, xRadius: rect.width*0.22, yRadius: rect.width*0.22).addClip()
+        img.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+    } else {
+        // Fallback: neutral tile if the artwork is unavailable.
+        fill(rect, t.card, radius: rect.width*0.22)
+    }
 }
 
 func save(_ bmp: NSBitmapImageRep, _ path: String) {
