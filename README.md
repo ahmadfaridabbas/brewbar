@@ -2,7 +2,7 @@
 
 A native SwiftUI menu-bar app for **Homebrew** on Apple Silicon, macOS 13 Ventura or newer. Run maintenance, browse installed packages, and manage updates from the menu bar with a live command console — no Terminal required.
 
-**[Website & gallery](https://ahmadfaridabbas.github.io/brewbar/)** · **[Download v1.9](docs/downloads/BrewBar-1.9.zip)** · macOS 13+ · Apple Silicon
+**[Website & gallery](https://ahmadfaridabbas.github.io/brewbar/)** · **[Download](https://github.com/ahmadfaridabbas/brewbar/releases/latest)** · macOS 13+ · Apple Silicon
 
 ![BrewBar maintenance dashboard in dark mode](docs/assets/hero.png)
 
