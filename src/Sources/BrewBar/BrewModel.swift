@@ -121,7 +121,10 @@ struct BrewAction: Identifiable {
         outputTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.flush() }
         }
-        process.run(executable: path, arguments: arguments, environment: environment, standardOutputFile: standardOutputFile) { [weak self] data in
+        // Interactive commands run under a PTY so brew emits its live progress bar. JSON captures
+        // (standardOutputFile set) stay on a plain pipe for clean, parseable output.
+        process.run(executable: path, arguments: arguments, environment: environment,
+                    standardOutputFile: standardOutputFile, usePTY: standardOutputFile == nil) { [weak self] data in
             self?.pending.append(data)
         } completion: { [weak self] code, cancelled in
             guard let self = self else { return }
@@ -259,12 +262,28 @@ struct BrewAction: Identifiable {
         guard count > 0 else { return }
         var text = String(decoding: pending.prefix(count), as: UTF8.self)
         pending.removeFirst(count)
-        text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        // Strip ANSI control sequences (cursor moves, colours) first, then honour carriage returns
+        // so brew's progress bar rewrites a single line in place instead of flooding the console.
         text = text.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\r\n", with: "\n")
         append(text)
     }
+    /// Appends `text` to `output`, treating a bare carriage return as "move to the start of the
+    /// current line and overwrite it". This keeps live progress bars on one line and leaves the
+    /// stored `output` clean for the Console view and the Copy button.
     private func append(_ text: String) {
-        output += text
+        for character in text {
+            if character == "\r" {
+                // Erase back to the start of the current line (after the last newline).
+                if let newline = output.lastIndex(of: "\n") {
+                    output.removeSubrange(output.index(after: newline)..<output.endIndex)
+                } else {
+                    output.removeAll(keepingCapacity: true)
+                }
+            } else {
+                output.append(character)
+            }
+        }
         if output.utf8.count > limit {
             output = "[Earlier output trimmed; showing recent output]\n" + String(output.suffix(limit / 2))
             truncated = true

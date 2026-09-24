@@ -8,12 +8,28 @@ final class CommandRunner {
     private var pid: pid_t = 0
     private var cancelled = false
 
+    /// When `usePTY` is true (and no `standardOutputFile` is set) the child is attached to a
+    /// pseudo-terminal so tools like brew detect an interactive TTY and emit live progress bars.
+    /// The PTY path is ignored when output is redirected to a file (JSON capture stays on a pipe).
     func run(executable: String, arguments: [String], environment: [String: String],
-             standardOutputFile: URL? = nil, output: @escaping (Data) -> Void, completion: @escaping (Int32, Bool) -> Void) {
+             standardOutputFile: URL? = nil, usePTY: Bool = false,
+             output: @escaping (Data) -> Void, completion: @escaping (Int32, Bool) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            var fds: [Int32] = [0, 0]
-            guard pipe(&fds) == 0 else {
-                DispatchQueue.main.async { completion(127, false) }; return
+            let pty = usePTY && standardOutputFile == nil
+            var fds: [Int32] = [0, 0]  // [read/master, write/slave]
+            if pty {
+                var master: Int32 = 0
+                var slave: Int32 = 0
+                // 24x80 default winsize gives brew a sensible terminal width for its progress bar.
+                var size = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
+                guard openpty(&master, &slave, nil, nil, &size) == 0 else {
+                    DispatchQueue.main.async { completion(127, false) }; return
+                }
+                fds = [master, slave]
+            } else {
+                guard pipe(&fds) == 0 else {
+                    DispatchQueue.main.async { completion(127, false) }; return
+                }
             }
             var actions: posix_spawn_file_actions_t?
             var attributes: posix_spawnattr_t?
@@ -23,6 +39,14 @@ final class CommandRunner {
                 posix_spawn_file_actions_destroy(&actions)
                 posix_spawnattr_destroy(&attributes)
             }
+            if pty {
+                // Child gets the slave as its controlling terminal for stdin/stdout/stderr.
+                posix_spawn_file_actions_adddup2(&actions, fds[1], STDIN_FILENO)
+                posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO)
+                posix_spawn_file_actions_adddup2(&actions, fds[1], STDERR_FILENO)
+                posix_spawn_file_actions_addclose(&actions, fds[1])
+                posix_spawn_file_actions_addclose(&actions, fds[0])
+            } else {
             posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
             if let file = standardOutputFile {
                 posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, file.path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
@@ -32,8 +56,15 @@ final class CommandRunner {
             posix_spawn_file_actions_adddup2(&actions, fds[1], STDERR_FILENO)
             posix_spawn_file_actions_addclose(&actions, fds[0])
             posix_spawn_file_actions_addclose(&actions, fds[1])
+            }
+            if pty {
+                // A new session makes the slave the child's controlling terminal. The child becomes
+                // its own process-group leader (pgid == pid), so group-directed signals still reach it.
+                posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
+            } else {
             posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP))
             posix_spawnattr_setpgroup(&attributes, 0)
+            }
             let argv = ([executable] + arguments).map { strdup($0) } + [nil]
             let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
             defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
@@ -100,11 +131,17 @@ struct BrewEnvironment {
         var seen = Set<String>()
         let unique = paths.filter { !$0.isEmpty && seen.insert($0).inserted }
         env["PATH"] = unique.joined(separator: ":")
-        env["TERM"] = "dumb"
+        // A real terminal type lets brew draw its download progress bar when running under a PTY.
+        // Colour stays disabled (and any stray escape codes are stripped) so console text is clean.
+        env["TERM"] = "xterm-256color"
         env["NO_COLOR"] = "1"
         env["HOMEBREW_NO_COLOR"] = "1"
         env["HOMEBREW_NO_ENV_HINTS"] = "1"
         env["NONINTERACTIVE"] = "1"
+        // Download sequentially so brew prints a single-line "####  100%" progress bar. The newer
+        // parallel download queue draws a multi-line animated spinner that a scrollback console
+        // (plain Text, no cursor addressing) cannot render cleanly.
+        env["HOMEBREW_DOWNLOAD_CONCURRENCY"] = "1"
         // Casks requiring administrator authentication must fail instead of waiting for a hidden prompt.
         env["SUDO_ASKPASS"] = "/usr/bin/false"
         let candidates = ["/opt/homebrew/bin/brew"] + unique.map { $0 + "/brew" }

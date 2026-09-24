@@ -123,3 +123,11 @@ Regression tests use a temporary fake brew executable, never real package remova
 The dashboard header now shows the app version beneath the tagline, e.g. `Version 1.9 (10)`. The string is read at runtime from the bundle's `Info.plist` (`CFBundleShortVersionString` and `CFBundleVersion`), so it always reflects the built bundle and requires no manual edit in code when the plist is bumped. A matching accessibility label is provided.
 
 The header also adds visible **Close** and **Quit** buttons. Close dismisses the panel while BrewBar stays in the menu bar; Quit terminates the app and is disabled while a command is running (matching the existing quit-protection guard). The Quit button keeps the ⌘Q shortcut. Optimized arm64 build verified; the built bundle reports version 1.9 (build 10).
+
+## Version 1.10: Live download progress
+
+Long-running commands (Update, Upgrade, Cleanup, and per-package upgrades) now run under a pseudo-terminal (PTY) so Homebrew detects an interactive terminal and emits its live download progress bar. Previously brew ran on a plain pipe with `TERM=dumb`, which suppressed the progress bar entirely — a large bottle download would show a `Fetching…` line and then no visible movement until it finished.
+
+`CommandRunner` gained a PTY path (`openpty` + `POSIX_SPAWN_SETSID`); the child's own session makes the slave its controlling terminal, and group-directed signals still reach it for Stop/cancel. JSON captures (installed/updates lists) stay on the plain pipe for clean, parseable output. The console model now honours carriage returns as in-place line rewrites, so the `####  100%` bar updates a single line instead of flooding the log — keeping both the live view and the Copy output clean. Downloads run sequentially (`HOMEBREW_DOWNLOAD_CONCURRENCY=1`) so brew prints the single-line progress bar rather than the newer multi-line animated parallel-download spinner, which a plain-text scrollback console cannot render. `TERM` is set to `xterm-256color` with colour disabled and stray escape codes stripped.
+
+Optimized arm64 build verified; the built bundle reports version 1.10 (build 11).
