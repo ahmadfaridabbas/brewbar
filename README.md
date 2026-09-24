@@ -37,18 +37,6 @@ Gallery images are native offscreen renders of BrewBar's interface, produced fro
 
 This is a locally (ad-hoc) signed build, not Apple-notarized. macOS may ask you to approve it in Privacy & Security. BrewBar requires an existing Homebrew installation at `/opt/homebrew`.
 
-## Build from source
-
-The source is in [`src/`](src/). With Apple Command Line Tools:
-
-```sh
-cd src
-./build.sh
-open build/BrewBar.app
-```
-
-Or open `src/BrewBar.xcodeproj` in Xcode 15+, select the **BrewBar** scheme and **My Mac**, and Run. See [`src/README.md`](src/README.md) for the full architecture notes and version history.
-
 ## Publishing
 
 See [PUBLISHING.md](PUBLISHING.md) for how the repository and website are structured and how to enable GitHub Pages.
