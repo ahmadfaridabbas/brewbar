@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BrewBar: a native SwiftUI menu-bar app that runs Homebrew maintenance, browses installed packages, and manages updates from your Mac's menu bar.">
+  <meta name="theme-color" content="#111213">
+  <title>BrewBar — A little care for your Homebrew.</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav wrap">
+  <a class="brand" href="#" aria-label="BrewBar home"><span class="brand-mark" aria-hidden="true">b.</span> BREWBAR</a>
+  <nav aria-label="Main navigation"><a href="#views">The panel</a><a href="#gallery">The looks</a><a href="#install">Install <span aria-hidden="true">↗</span></a></nav>
+</header>
+<main id="main">
+  <section class="hero wrap" aria-labelledby="hero-title">
+    <div class="hero-copy"><p class="eyebrow"><span class="square" aria-hidden="true"></span> A HOMEBREW MENU-BAR APP FOR MAC</p><h1 id="hero-title">A little care<br>for your <em>Homebrew.</em></h1><p class="intro">Update, upgrade, and clean up Homebrew from the menu bar. Browse installed packages and manage updates — with live output and no terminal.</p><a class="button" href="downloads/BrewBar-1.9.zip" download>Download for macOS <span aria-hidden="true">↓</span></a><p class="requirements">v1.9 &nbsp; / &nbsp; macOS 13+ &nbsp; / &nbsp; Apple Silicon</p></div>
+    <figure class="hero-figure"><img src="assets/hero.png" width="560" height="680" alt="BrewBar dashboard in dark mode showing the maintenance actions grid and command console"><figcaption><span>01 / MAINTENANCE</span><span>Dark appearance</span></figcaption></figure>
+  </section>
+  <div class="feature-strip wrap"><span>Native SwiftUI menu-bar app</span><span>Live command console</span><span>Light · Dark · System</span><span>No Terminal required</span></div>
+
+  <section id="views" class="section wrap" aria-labelledby="views-title">
+    <div class="section-heading"><p class="eyebrow">01 / THE PANEL</p><h2 id="views-title">One window.<br>Every chore.</h2><p>Maintenance actions, your installed inventory, available updates, and a live console — all in a single menu-bar panel.</p></div>
+    <div class="hands-layout">
+      <figure class="style-preview"><img id="view-image" src="assets/view-maintenance.png" width="560" height="680" alt="BrewBar Maintenance tab with the two-column action grid"><figcaption><span id="view-name">Maintenance</span><span>MENU-BAR PANEL</span></figcaption></figure>
+      <div class="style-list" aria-label="Preview a panel view">
+        <button type="button" data-view="maintenance" aria-pressed="true"><span class="style-number">01</span><span><strong>Maintenance</strong><small>Update, Outdated, Upgrade, Cleanup, Autoremove, Doctor.</small></span><span class="style-symbol" aria-hidden="true">↗</span></button>
+        <button type="button" data-view="installed" aria-pressed="false"><span class="style-number">02</span><span><strong>Installed</strong><small>Search formulae and casks, then uninstall.</small></span><span class="style-symbol" aria-hidden="true">↗</span></button>
+        <button type="button" data-view="updates" aria-pressed="false"><span class="style-number">03</span><span><strong>Updates</strong><small>See installed → current versions and upgrade.</small></span><span class="style-symbol" aria-hidden="true">↗</span></button>
+        <button type="button" data-view="console" aria-pressed="false"><span class="style-number">04</span><span><strong>Console</strong><small>Live merged output, exit codes, and Stop.</small></span><span class="style-symbol" aria-hidden="true">↗</span></button>
+      </div>
+    </div>
+    <p class="section-note">Each action runs a real <code>brew</code> command with fixed arguments — no shell interpolation. Close tucks the panel away; BrewBar stays in the menu bar.</p>
+    <noscript><p>View each screen: <a href="assets/view-maintenance.png">Maintenance</a>, <a href="assets/view-installed.png">Installed</a>, <a href="assets/view-updates.png">Updates</a>, <a href="assets/view-console.png">Console</a>.</p></noscript>
+  </section>
+
+  <section id="gallery" class="section gallery-section" aria-labelledby="gallery-title"><div class="wrap">
+    <div class="section-heading"><p class="eyebrow">02 / THE LOOKS</p><h2 id="gallery-title">Light, dark,<br>or your Mac.</h2><p>BrewBar follows your system appearance or locks to Light or Dark. Here are a few of its screens.</p></div>
+    <div class="gallery">
+      <a class="shot" href="assets/dark.png" data-caption="Maintenance · Dark appearance"><img loading="lazy" src="assets/dark.png" width="560" height="680" alt="BrewBar maintenance actions in dark mode"><span><strong>Maintenance</strong><small>Dark <b aria-hidden="true">↗</b></small></span></a>
+      <a class="shot" href="assets/light.png" data-caption="Maintenance · Light appearance"><img loading="lazy" src="assets/light.png" width="560" height="680" alt="BrewBar maintenance actions in light mode"><span><strong>Maintenance</strong><small>Light <b aria-hidden="true">↗</b></small></span></a>
+      <a class="shot" href="assets/installed.png" data-caption="Installed · Formulae and casks"><img loading="lazy" src="assets/installed.png" width="560" height="680" alt="BrewBar installed packages list with search and uninstall"><span><strong>Installed</strong><small>Formulae &amp; casks <b aria-hidden="true">↗</b></small></span></a>
+      <a class="shot" href="assets/updates.png" data-caption="Updates · Available upgrades"><img loading="lazy" src="assets/updates.png" width="560" height="680" alt="BrewBar updates list with per-package upgrade buttons"><span><strong>Updates</strong><small>Available upgrades <b aria-hidden="true">↗</b></small></span></a>
+      <a class="shot" href="assets/console.png" data-caption="Console · Live command output"><img loading="lazy" src="assets/console.png" width="560" height="680" alt="BrewBar console streaming live output from a running command"><span><strong>Console</strong><small>Live output <b aria-hidden="true">↗</b></small></span></a>
+      <a class="shot" href="assets/updates-light.png" data-caption="Updates · Light appearance"><img loading="lazy" src="assets/updates-light.png" width="560" height="680" alt="BrewBar updates list in light mode"><span><strong>Updates</strong><small>Light <b aria-hidden="true">↗</b></small></span></a>
+    </div>
+    <p class="section-note">Images are native offscreen renders of BrewBar's interface. Select an image to view it larger.</p>
+  </div></section>
+
+  <section class="section wrap details" aria-labelledby="details-title"><div><p class="eyebrow">03 / THE DETAILS</p><h2 id="details-title">Built to<br>behave.</h2></div><dl><div><dt>Maintenance</dt><dd>Update, Outdated, Upgrade, Cleanup, Autoremove, and Doctor — each a real <code>brew</code> command run with fixed, validated arguments.</dd></div><div><dt>Inventory</dt><dd>Browse installed formulae and casks with search, then uninstall with a confirmation. Homebrew's dependency checks stay active.</dd></div><div><dt>Updates</dt><dd>See installed → current versions from <code>brew outdated</code>, upgrade individually or all at once. Pinned packages are labeled.</dd></div><div><dt>Live console</dt><dd>Merged stdout/stderr in arrival order, timestamps, duration, and the real exit code. Stop escalates SIGINT → SIGTERM → SIGKILL.</dd></div><div><dt>Appearance</dt><dd>System, Light, or Dark, saved across launches, with matching light/dark artwork. A visible version line and Close / Quit controls.</dd></div><div><dt>Considerate</dt><dd>One command at a time. Closing the panel keeps a job running. Quit is blocked while busy. No Dock icon; a menu-bar template glyph.</dd></div></dl></section>
+
+  <section id="install" class="install-section"><div class="wrap install-layout"><div><p class="eyebrow">04 / ON YOUR MAC</p><h2>Tend your<br>brew.</h2><a class="button" href="downloads/BrewBar-1.9.zip" download>Download BrewBar <span aria-hidden="true">↓</span></a><p class="requirements">macOS 13 Ventura or later · Apple Silicon</p></div><div><ol class="steps"><li><strong>Download &amp; unzip</strong><p>Open the ZIP to find <code>BrewBar.app</code>.</p></li><li><strong>Move &amp; open</strong><p>Drag it to Applications, then right-click → Open the first time.</p></li><li><strong>Find the mug</strong><p>Click the Terminal Mug glyph in the menu bar to open the panel.</p></li></ol><details><summary>Compatibility &amp; installation notes</summary><p>This build is ad-hoc signed and is not Apple-notarized. macOS may ask you to approve it in Privacy &amp; Security, or you can build locally from <code>src/</code> with <code>./build.sh</code>.</p><p>BrewBar needs an existing Homebrew install at <code>/opt/homebrew</code>. It reads your login environment to locate <code>brew</code> and shows the resolved path in the footer.</p><p>Optimized arm64 build and runner tests passed. Interactive UI and VoiceOver checks are recommended manually; the panel is a streaming console, not a full terminal.</p></details></div></div></section>
+</main>
+<footer class="wrap"><a class="brand" href="#"><span class="brand-mark" aria-hidden="true">b.</span> BREWBAR</a><p>A native SwiftUI menu-bar utility for Homebrew.<br>Independent project. Not affiliated with Homebrew. Version 1.9.</p></footer>
+<dialog id="image-dialog" aria-labelledby="image-caption"><button id="close-dialog" type="button" aria-label="Close enlarged image">Close <span aria-hidden="true">×</span></button><img id="large-image" alt=""><p id="image-caption"></p></dialog>
+</body>
+</html>
