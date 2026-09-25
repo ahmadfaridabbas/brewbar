@@ -12,6 +12,12 @@ import Darwin
         precondition(updates.first { $0.kind == "App" }!.arguments == ["upgrade", "--cask", "test-app"])
         precondition(try! PackageUpdate.parse(Data(#"{"formulae":[],"casks":[]}"#.utf8)).isEmpty)
         do { _ = try PackageUpdate.parse(Data("{}".utf8)); preconditionFailure("Invalid update data accepted") } catch {}
+        // Regression: brew prints "==> Downloading Homebrew API data" to stdout before the JSON
+        // when its API cache is cold. That preamble must not break parsing (Exit 0 but read error).
+        let noisy = Data(("==> Downloading Homebrew API data\n" + #"{"formulae":[{"name":"wget","installed_versions":["1.0"],"current_version":"2.0","pinned":false}],"casks":[]}"# + "\n").utf8)
+        precondition(try! PackageUpdate.parse(noisy).count == 1, "Progress preamble broke update parsing")
+        let noisyInstalled = Data(("==> Downloading Homebrew API data\n" + #"{"formulae":[{"name":"wget","full_name":"wget","desc":"d","installed":[{"version":"1.0"}]}],"casks":[]}"#).utf8)
+        precondition(try! InstalledPackage.parse(noisyInstalled).count == 1, "Progress preamble broke installed parsing")
         print("PASS: screenshot revision and version updates, formula/cask routing, empty/malformed updates")
         let runner = CommandRunner()
         var received = ""

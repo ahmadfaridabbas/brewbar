@@ -20,8 +20,21 @@ struct PackageUpdate: Identifiable, Decodable {
     }
     static func parse(_ data: Data) throws -> [PackageUpdate] {
         struct Response: Decodable { let formulae: [PackageUpdate]; let casks: [PackageUpdate] }
-        let response = try JSONDecoder().decode(Response.self, from: data)
+        let response = try JSONDecoder().decode(Response.self, from: JSONExtraction.object(from: data))
         return (response.formulae + response.casks.map { var p = $0; p.kind = "App"; return p })
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+}
+
+/// Homebrew sometimes writes human-readable progress to stdout before its JSON payload
+/// (for example `==> Downloading Homebrew API data` when its API cache is cold). That text
+/// lands in the same capture file as the JSON and breaks a strict decode. This trims the
+/// bytes down to the outermost `{ ... }` object so parsing tolerates such preambles.
+enum JSONExtraction {
+    static func object(from data: Data) -> Data {
+        guard let start = data.firstIndex(of: UInt8(ascii: "{")),
+              let end = data.lastIndex(of: UInt8(ascii: "}")),
+              start <= end else { return data }
+        return data.subdata(in: start..<(data.index(after: end)))
     }
 }

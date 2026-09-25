@@ -137,3 +137,9 @@ Optimized arm64 build verified; the built bundle reports version 1.10 (build 11)
 BrewBar is now released under the MIT License (a `LICENSE` file at the repository root; GitHub detects it as MIT). The panel footer shows a small `MIT License · © 2026 Ahmad Farid Abbas` line beneath the "One command at a time" status, and the website footer links the license.
 
 Optimized arm64 build verified; the built bundle reports version 1.11 (build 12).
+
+## Version 1.12: resilient update-data parsing
+
+Fixed an intermittent "Could not read Homebrew update data" error that appeared even when `brew outdated --json=v2` exited 0. When Homebrew's API cache is cold it prints `==> Downloading Homebrew API data` to stdout before the JSON payload; that preamble landed in the same capture file and broke the strict JSON decode. Both the updates and installed-package parsers now trim the captured bytes to the outermost JSON object before decoding, tolerating any leading progress lines. Added regression tests covering the preamble case.
+
+Optimized arm64 build verified; the built bundle reports version 1.12 (build 13).

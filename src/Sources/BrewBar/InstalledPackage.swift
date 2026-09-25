@@ -13,7 +13,7 @@ struct InstalledPackage: Identifiable, Equatable {
     var uninstallArguments: [String] { ["uninstall", kind == "App" ? "--cask" : "--formula", token] }
 
     static func parse(_ data: Data) throws -> [InstalledPackage] {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let root = try JSONSerialization.jsonObject(with: JSONExtraction.object(from: data)) as? [String: Any],
               let formulae = root["formulae"] as? [[String: Any]],
               let casks = root["casks"] as? [[String: Any]] else { throw CocoaError(.coderReadCorrupt) }
         var result: [InstalledPackage] = []
