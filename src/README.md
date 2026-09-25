@@ -169,3 +169,14 @@ BrewBar now answers that prompt interactively. When brew asks, the console shows
 Implementation: `CommandRunner` gained a `send(_:)` that writes to the PTY master (tracked as `inputFD`, cleared under lock when the fd closes). `BrewModel` detects the trailing `[y/n]`/`(y/N)` in the live output (`detectPrompt()`), exposes `awaitingInput`/`promptText`, and `answer(_:)` echoes the choice and forwards it to the runner. The prompt state clears on new command, completion, and Stop. JSON/file captures (search, info, outdated) never prompt because they don't use the PTY.
 
 Optimized arm64 build verified; the built bundle reports version 1.15 (build 16).
+
+## Version 1.15.1: Prompt-bar and Updates-list fixes
+
+Two fixes to the v1.15 interactive prompt and the Updates tab:
+
+- **Prompt bar lingered / could be answered repeatedly.** Detection scanned a large tail of the console for `[y/n]`, so after you answered, the still-present prompt text re-armed the bar and let you click Yes/No again (sending stray `y` characters). Detection is now *edge-triggered*: it arms only when the current **last line** is the prompt, and disarms the instant brew echoes the answer or prints its next line. `answer(_:)` disarms immediately, so a rapid second click is a no-op.
+- **Other Upgrade buttons disabled after upgrading one package.** A successful upgrade set `updatesStale`, which disabled every remaining row's Upgrade button until a manual "Check". Now a successful single upgrade drops the upgraded row and re-checks in the background, so the remaining rows stay actionable; Upgrade All also re-checks. Failed/cancelled upgrades still mark the list stale.
+
+Added an interactive-prompt regression test (arms once, answers via the PTY, does not re-arm; yes→exit 0, no→exit 1).
+
+Optimized arm64 build verified; the built bundle reports version 1.15.1 (build 17).

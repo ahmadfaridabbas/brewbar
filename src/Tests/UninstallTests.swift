@@ -95,6 +95,48 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         }
         print("PASS: all six maintenance buttons run only their named command; compact output")
         print("PASS: uninstall selection/cancel, launch, concurrency guard, success, failure retention, Stop")
+
+        // Interactive [y/n] prompt: a fake brew that prints the ask-mode prompt then reads one char
+        // from its TTY. The model must arm awaitingInput on the prompt line, answering "y" must let
+        // it proceed to exit 0, and the prompt must NOT re-arm on the echoed answer / later output.
+        let asker = folder.appendingPathComponent("ask-brew")
+        try """
+        #!/usr/bin/env ruby
+        require 'io/console'
+        STDOUT.sync = true
+        puts '==> Upgrading 1 outdated package:'
+        puts 'demo 1.0 -> 2.0'
+        puts '==> Do you want to proceed with the upgrade? [y/n]'
+        c = STDIN.getch
+        puts ''
+        puts '==> Fetching downloads for: demo'
+        puts '==> Downloading https://example.invalid/demo'
+        exit(c == 'y' ? 0 : 1)
+        """.write(to: asker, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: asker.path)
+        model.brewPath = asker.path
+        model.run(BrewAction(command: "upgrade", title: "Upgrade", detail: "", icon: ""))
+        // Wait for the prompt to be recognised.
+        pump { model.awaitingInput }
+        precondition(model.promptText.contains("[y/n]"), "Prompt label should be the [y/n] line, got: \(model.promptText)")
+        // Answering must disarm immediately and send exactly one byte.
+        model.answer(true)
+        precondition(!model.awaitingInput, "Answering must disarm the prompt")
+        model.answer(true)   // A second click after disarm must be a no-op (guarded).
+        pump { !model.busy }
+        precondition(model.exitCode == 0, "Answering yes should let the command proceed to exit 0")
+        // After brew moved past the prompt, the bar must stay disarmed even though "[y/n]" text is
+        // still present earlier in the buffer (the old bug re-armed on that stale tail).
+        precondition(!model.awaitingInput, "Prompt must not re-arm after brew proceeds")
+        precondition(model.output.contains("Fetching downloads"), "Should have continued past the prompt")
+
+        // Answering "no" aborts (exit 1).
+        model.run(BrewAction(command: "upgrade", title: "Upgrade", detail: "", icon: ""))
+        pump { model.awaitingInput }
+        model.answer(false)
+        pump { !model.busy }
+        precondition(model.exitCode == 1 && !model.awaitingInput, "Answering no should abort (exit 1)")
+        print("PASS: interactive [y/n] prompt arms once, answers via PTY, and does not re-arm")
     }
     static func pump(_ done: () -> Bool) {
         let end = Date().addingTimeInterval(12)

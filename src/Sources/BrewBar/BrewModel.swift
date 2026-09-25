@@ -332,7 +332,16 @@ struct BrewAction: Identifiable {
               updates.contains(where: { $0.id == package.id }) else { return }
         execute(arguments: package.arguments) { [weak self] code, cancelled in
             guard let self = self else { return }
-            self.inventoryStale = true; self.updatesStale = true
+            self.inventoryStale = true
+            if code == 0 && !cancelled {
+                // The package is no longer outdated: drop its row and re-check in the background so
+                // the remaining rows stay actionable (no manual "Check" needed after each upgrade).
+                self.updates.removeAll { $0.id == package.id }
+                self.checkUpdates(preserveOutput: true)
+            } else {
+                // A failed/cancelled upgrade may have changed things; ask for a re-check before more.
+                self.updatesStale = true
+            }
         }
     }
 
@@ -340,7 +349,10 @@ struct BrewAction: Identifiable {
         guard !busy, ready, !updatesStale, updates.contains(where: { !$0.pinned }) else { return }
         execute(arguments: ["upgrade"]) { [weak self] code, cancelled in
             guard let self = self else { return }
-            self.inventoryStale = true; self.updatesStale = true
+            self.inventoryStale = true
+            // Upgrade All targets everything; re-check afterwards to reflect the new state.
+            if code == 0 && !cancelled { self.checkUpdates(preserveOutput: true) }
+            else { self.updatesStale = true }
         }
     }
 
@@ -371,32 +383,32 @@ struct BrewAction: Identifiable {
 
     /// Recognise brew's interactive confirmation (`ohai "Do you want to proceed with the … ? [y/n]"`)
     /// so the console can offer Yes/No. brew only prompts when both stdin and stdout are a TTY, which
-    /// is exactly the PTY path; JSON/file captures (search, info, outdated) never prompt. Matching a
-    /// trailing `[y/n]` / `(y/N)` at the end of the current output keeps it robust to future wording.
+    /// is exactly the PTY path; JSON/file captures (search, info, outdated) never prompt.
+    ///
+    /// This is *edge-triggered*: we arm only when the **current last non-empty line** is itself the
+    /// prompt. As soon as brew echoes our answer or prints its next line (Fetching/Downloading…), the
+    /// last line is no longer the prompt, so we disarm — the bar can't linger or let you answer twice.
     private func detectPrompt() {
         guard busy, !stopping else { return }
-        let tail = output.suffix(400)
-        let waiting = tail.range(of: "\\[y/n\\]|\\(y/N\\)|\\? \\[Y/n\\]",
-                                 options: [.regularExpression, .caseInsensitive]) != nil
-        if waiting {
-            if !awaitingInput {
-                awaitingInput = true
-                // Show the last non-empty line as the prompt label.
-                promptText = output.split(separator: "\n").last.map(String.init) ?? "Do you want to proceed? [y/n]"
-            }
+        // The last non-empty, non-progress line currently in the buffer.
+        let lastLine = output.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
+        let isPrompt = lastLine.range(of: "\\[y/n\\]\\s*$|\\(y/N\\)\\s*$|\\?\\s*\\[Y/n\\]\\s*$",
+                                      options: [.regularExpression, .caseInsensitive]) != nil
+        if isPrompt {
+            if !awaitingInput { awaitingInput = true; promptText = lastLine }
         } else if awaitingInput {
-            // brew has moved on (e.g. it echoed our answer and started working).
+            // brew moved past the prompt (echoed the answer / started working).
             awaitingInput = false; promptText = ""
         }
     }
 
     /// Answer a pending `[y/n]` prompt. brew reads a single character via `$stdin.getch`, so we send
-    /// one byte (no newline). "n" makes brew `exit 1`, which our completion reports as cancelled-ish
-    /// (non-zero exit) — the console shows "Needs attention" with the abort noted by brew itself.
+    /// one byte (no newline). "n" makes brew `exit 1`, which our completion reports as a non-zero
+    /// exit — the console shows "Needs attention" with the abort noted by brew itself.
+    /// Disarms immediately so a rapid second click can't send a stray extra character.
     func answer(_ proceed: Bool) {
         guard busy, awaitingInput else { return }
-        awaitingInput = false
-        append(proceed ? "y\n" : "n\n")
+        awaitingInput = false; promptText = ""
         runner?.send(proceed ? "y" : "n")
     }
     /// Appends `text` to `output`, treating a bare carriage return as "move to the start of the
