@@ -12,7 +12,7 @@ Website: https://ahmadfaridabbas.github.io/brewbar/
 2. Upload the **contents** of this folder into the repository root, including `src/` and `docs/`.
 3. Commit the files to your default branch, usually `main`.
 
-The `src/build/` output is a local build artifact and does not need to be uploaded. The installable version is already included at `docs/downloads/BrewBar-1.16.zip`, which preserves the macOS bundle and executable permissions. Include `docs/.nojekyll` so GitHub Pages serves the files as-is.
+The `src/build/` output is a local build artifact and does not need to be uploaded. The installable version is already included at `docs/downloads/BrewBar-1.17.zip`, which preserves the macOS bundle and executable permissions. Include `docs/.nojekyll` so GitHub Pages serves the files as-is.
 
 ## 2. Enable GitHub Pages
 
@@ -28,7 +28,7 @@ Official instructions: https://docs.github.com/en/pages/getting-started-with-git
 
 ## 3. Optional GitHub Release
 
-Create a release tagged `v1.16` and attach `docs/downloads/BrewBar-1.16.zip`. The website's download button already points at its bundled ZIP, so a Release is optional.
+Create a release tagged `v1.17` and attach `docs/downloads/BrewBar-1.17.zip`. The website's download button already points at its bundled ZIP, so a Release is optional.
 
 ## Updating
 

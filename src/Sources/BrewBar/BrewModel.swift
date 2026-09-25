@@ -379,8 +379,13 @@ struct BrewAction: Identifiable {
         guard count > 0 else { return }
         var text = String(decoding: pending.prefix(count), as: UTF8.self)
         pending.removeFirst(count)
-        // Strip ANSI control sequences (cursor moves, colours) first, then honour carriage returns
-        // so brew's progress bar rewrites a single line in place instead of flooding the console.
+        // Homebrew's parallel download queue redraws its status line each frame by moving the cursor
+        // to column 0 with a CHA sequence (`ESC[<n>G`, typically `ESC[0G`) rather than a bare CR.
+        // Translate that to a carriage return first so `append` rewrites the line in place (the same
+        // way it handles the single-download bar). Then strip the remaining ANSI control sequences
+        // (colours, cursor show/hide, synchronized-output `?2026h/l`, erase-line `[K`) and honour CRs
+        // so brew's progress bar updates one line instead of flooding the console.
+        text = text.replacingOccurrences(of: "\u{001B}\\[[0-9]*G", with: "\r", options: .regularExpression)
         text = text.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
         text = text.replacingOccurrences(of: "\r\n", with: "\n")
         append(text)
@@ -434,6 +439,17 @@ struct BrewAction: Identifiable {
             case .progress(let fraction):
                 // Only advance a live bar; ignore stray percentages before a Downloading line.
                 if download != nil { download?.fraction = fraction }
+            case .bytes(let received, let total, let name):
+                // brew reported its own byte counter (parallel queue). Use it verbatim; it can also
+                // arrive without a preceding `==> Downloading` line, so start a bar if needed. No
+                // HEAD estimate is needed once we have brew's real numbers.
+                if download == nil {
+                    download = DownloadProgress(fileName: name ?? "Downloading…", fraction: 0, totalBytes: nil)
+                } else if let name, download?.fileName == "Downloading…" {
+                    download?.fileName = name
+                }
+                downloadSizeToken = UUID()  // cancel any pending HEAD; brew's numbers win
+                download?.applyExactBytes(received: received, total: total)
             case .finish:
                 clearDownload()
             case .none:

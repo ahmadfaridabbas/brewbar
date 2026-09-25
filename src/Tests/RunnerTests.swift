@@ -123,6 +123,26 @@ import Darwin
         precondition(dp.summary == "13.1 MB of 26.1 MB · 50%", "Unexpected summary: \(dp.summary)")
         precondition(DownloadProgress.format(512) == "512 bytes")
         precondition(DownloadProgress.format(2048) == "2.0 KB")
+
+        // brew's parallel-queue byte counter drives the bar with exact numbers (no HEAD needed).
+        guard case .bytes(let rcv, let tot, let bname) =
+            parse("⠿ Cask readdle-spark (3.31.3.141073) ##########   Downloading 263.1MB/373.1MB")
+        else { preconditionFailure("byte counter should yield .bytes") }
+        precondition(bname == "readdle-spark", "Bad cask name: \(String(describing: bname))")
+        precondition(rcv == Int64((263.1 * 1024 * 1024).rounded()))
+        precondition(tot == Int64((373.1 * 1024 * 1024).rounded()))
+        // `Downloaded X/X` (received == total) means finished.
+        precondition(parse("✓ Cask readdle-spark (3.31.3.141073)          Downloaded 373.1MB/373.1MB") == .finish)
+        // A byte counter without a Cask/Formula prefix still parses (name nil).
+        guard case .bytes(_, _, let noName) = parse("Downloading 1.5GB/4.0GB") else { preconditionFailure("bytes w/o name") }
+        precondition(noName == nil)
+        // applyExactBytes sets authoritative bytes + fraction, overriding any estimate.
+        var ex = DownloadProgress(fileName: "spark.pkg", fraction: 0.2, totalBytes: 999)
+        ex.applyExactBytes(received: 263_100_000, total: 373_100_000)
+        precondition(ex.downloadedBytes == 263_100_000 && ex.totalBytes == 373_100_000)
+        precondition(abs(ex.fraction - 0.705) < 0.01, "fraction from bytes wrong: \(ex.fraction)")
+        precondition(DownloadProgressParser.bytes(value: "263.1", unit: "MB") == Int64((263.1 * 1024 * 1024).rounded()))
+        precondition(DownloadProgressParser.bytes(value: "2", unit: "GB") == Int64(2) * 1024 * 1024 * 1024)
         print("PASS: download progress parsing (start/advance/finish), file-name extraction, byte summary")
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }

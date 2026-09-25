@@ -166,10 +166,12 @@ struct BrewEnvironment {
         // `install` to "ask mode" (a `Do you want to proceed? [y/n]` confirmation). BrewBar keeps
         // that prompt and answers it interactively: the console detects the prompt and shows Yes/No
         // buttons that write a single `y`/`n` byte to the command's PTY (see CommandRunner.send).
-        // Download sequentially so brew prints a single-line "####  100%" progress bar. The newer
-        // parallel download queue draws a multi-line animated spinner that a scrollback console
-        // (plain Text, no cursor addressing) cannot render cleanly.
-        env["HOMEBREW_DOWNLOAD_CONCURRENCY"] = "1"
+        // Let Homebrew use its parallel download queue (the default). It redraws a status line with
+        // a byte counter — `⠋ Cask <name> (<ver>) ####  Downloading 263.1MB/373.1MB` — moving the
+        // cursor to column 0 each frame via `ESC[0G`. BrewModel.flush translates that CHA to a
+        // carriage return so the scrollback console rewrites the line in place, and parses the
+        // `Downloading X/Y` counter to drive the progress bar with brew's own byte figures.
+        // (Previously this was pinned to `HOMEBREW_DOWNLOAD_CONCURRENCY=1` for a percent-only bar.)
         // Casks requiring administrator authentication must fail instead of waiting for a hidden prompt.
         env["SUDO_ASKPASS"] = "/usr/bin/false"
         let candidates = ["/opt/homebrew/bin/brew"] + unique.map { $0 + "/brew" }

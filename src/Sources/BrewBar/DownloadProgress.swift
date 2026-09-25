@@ -13,11 +13,25 @@ struct DownloadProgress: Equatable {
     var fraction: Double
     /// Total size in bytes when known (resolved asynchronously from the URL). Nil until it arrives.
     var totalBytes: Int64?
+    /// Received bytes when brew reports them directly (parallel-queue `Downloading X/Y`). When set,
+    /// this is authoritative and the fraction/total are derived from brew's own numbers rather than
+    /// a HEAD estimate.
+    var exactReceivedBytes: Int64?
 
-    /// Bytes downloaded so far, derived from `fraction` × `totalBytes` when the size is known.
+    /// Bytes downloaded so far: brew's exact figure when available, else `fraction` × `totalBytes`.
     var downloadedBytes: Int64? {
+        if let exact = exactReceivedBytes { return exact }
         guard let total = totalBytes else { return nil }
         return Int64((Double(total) * fraction).rounded())
+    }
+
+    /// Apply brew's exact received/total byte counter. Also updates `fraction` so the bar fills to
+    /// brew's real position, and marks the size as authoritative (no HEAD estimate needed).
+    mutating func applyExactBytes(received: Int64, total: Int64) {
+        guard total > 0 else { return }
+        exactReceivedBytes = received
+        totalBytes = total
+        fraction = min(max(Double(received) / Double(total), 0), 1)
     }
 
     /// A short label such as `45%`, `12.3 MB of 27.4 MB · 45%`, or just the fraction when the size
@@ -49,6 +63,11 @@ enum DownloadProgressParser {
         case start(url: String, fileName: String)
         /// The active download advanced to `fraction` (0...1).
         case progress(fraction: Double)
+        /// The active download advanced to a known byte position (brew's own counter, e.g.
+        /// `Downloading 263.1MB/373.1MB`). Carries exact received/total bytes so the bar shows
+        /// brew's real numbers without a HEAD request. `name` is the cask/file when the status line
+        /// includes it (`Cask readdle-spark (…) … Downloading …`), else nil.
+        case bytes(received: Int64, total: Int64, name: String?)
         /// The active download finished (file written) or the command moved to a non-download step;
         /// the model should hide the bar.
         case finish
@@ -59,6 +78,17 @@ enum DownloadProgressParser {
     /// A run of bar glyphs (`#`, `=`, `O`, `-`, `.`, `>`, spaces) ending in `NN.N%` or `NN%`.
     private static let barRegex = try! NSRegularExpression(
         pattern: #"^[#=O.\->\s]*?(\d{1,3}(?:\.\d+)?)%\s*$"#)
+
+    /// brew's parallel-download-queue byte counter, e.g. `Downloading 263.1MB/373.1MB` or
+    /// `Downloaded 373.1MB/373.1MB` (optionally embedded in a `Cask name (ver) ####  Downloading …`
+    /// status line). Captures received value+unit and total value+unit.
+    private static let byteRegex = try! NSRegularExpression(
+        pattern: #"Download(?:ing|ed)\s+([\d.]+)\s*([KMGT]?B)\s*/\s*([\d.]+)\s*([KMGT]?B)"#,
+        options: [.caseInsensitive])
+
+    /// `Cask <name> (<ver>)` / `Formula <name> (<ver>)` prefix on brew's parallel-queue status line.
+    private static let caskNameRegex = try! NSRegularExpression(
+        pattern: #"(?:Cask|Formula)\s+([A-Za-z0-9@._+-]+)"#)
 
     static func parse(line rawLine: String) -> Action {
         let line = rawLine.trimmingCharacters(in: .whitespaces)
@@ -80,8 +110,27 @@ enum DownloadProgressParser {
             return .finish
         }
 
-        // The percentage bar. `100%`/`100.0%` also ends the bar.
+        // brew's parallel-queue byte counter (`Downloading 263.1MB/373.1MB` /
+        // `Downloaded 373.1MB/373.1MB`), possibly inside a `Cask name (ver) #### Downloading …` line.
+        // This carries brew's exact numbers, so prefer it over the percentage bar. When received
+        // meets/exceeds total the download is complete.
         let ns = line as NSString
+        if let match = byteRegex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)),
+           let received = bytes(value: ns.substring(with: match.range(at: 1)),
+                                unit: ns.substring(with: match.range(at: 2))),
+           let total = bytes(value: ns.substring(with: match.range(at: 3)),
+                             unit: ns.substring(with: match.range(at: 4))),
+           total > 0 {
+            // Pull the cask/formula name from a `Cask <name> (<ver>)` or `Formula <name>` prefix.
+            var name: String?
+            if let m = caskNameRegex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
+                let n = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
+                if !n.isEmpty { name = n }
+            }
+            return received >= total ? .finish : .bytes(received: received, total: total, name: name)
+        }
+
+        // The percentage bar. `100%`/`100.0%` also ends the bar.
         if let match = barRegex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)),
            let value = Double(ns.substring(with: match.range(at: 1))) {
             let fraction = min(max(value / 100.0, 0), 1)
@@ -113,5 +162,21 @@ enum DownloadProgressParser {
         let decoded = lastComponent.removingPercentEncoding ?? lastComponent
         let cleaned = decoded.trimmingCharacters(in: .whitespaces)
         return cleaned.isEmpty ? url : cleaned
+    }
+
+    /// Convert a brew byte figure (e.g. value "263.1", unit "MB") to a byte count. brew uses binary
+    /// units (MB == MiB). Returns nil for an unparseable value.
+    static func bytes(value: String, unit: String) -> Int64? {
+        guard let n = Double(value) else { return nil }
+        let factor: Double
+        switch unit.uppercased() {
+        case "B": factor = 1
+        case "KB": factor = 1024
+        case "MB": factor = 1024 * 1024
+        case "GB": factor = 1024 * 1024 * 1024
+        case "TB": factor = 1024 * 1024 * 1024 * 1024
+        default: return nil
+        }
+        return Int64((n * factor).rounded())
     }
 }
