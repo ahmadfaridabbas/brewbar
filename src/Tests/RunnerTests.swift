@@ -82,6 +82,48 @@ import Darwin
         let tokens = SearchResult.searchTokens("==> Formulae\nwget\nwget2\n\nWarning: nothing\nnode\n")
         precondition(tokens == ["wget", "wget2", "node"], "Unexpected search tokens: \(tokens)")
         print("PASS: search result parsing (kind, version, installed-state), install arguments, token extraction")
+
+        // Download progress parser: brew's `==> Downloading <url>` starts a bar, the `#### NN.N%`
+        // line advances it, and 100%/`Downloaded to:`/a following `==>` step ends it.
+        typealias PAction = DownloadProgressParser.Action
+        func parse(_ line: String) -> PAction { DownloadProgressParser.parse(line: line) }
+        // Start: a real http(s) URL begins a download and extracts a readable file name.
+        guard case .start(_, let dlName) = parse("==> Downloading https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin.zip")
+        else { preconditionFailure("Downloading line should start a download") }
+        precondition(dlName == "ChatGPT-darwin.zip", "Bad file name: \(dlName)")
+        // Query strings and percent-encoding are stripped from the file name.
+        precondition(DownloadProgressParser.fileName(fromURL:
+            "https://release-assets.githubusercontent.com/x/y?rscd=attachment%3B+filename%3DHack-v3.003-ttf.zip&sig=abc")
+            == "y", "File name should be the URL's last path component")
+        precondition(DownloadProgressParser.fileName(fromURL:
+            "https://example.com/downloads/Hack%20Nerd%20Font.zip") == "Hack Nerd Font.zip")
+        // `Downloading from <mirror>` is a redirect notice, not a new file.
+        precondition(parse("==> Downloading from https://mirror.example.com/file.zip") == .none)
+        // brew's API cache preamble must not be treated as a file download.
+        precondition(parse("==> Downloading Homebrew API data") == .none)
+        // Progress frames.
+        precondition(parse("####                                                                       6.8%") == .progress(fraction: 0.068))
+        precondition(parse("################################                                          45.1%") == .progress(fraction: 0.451))
+        precondition(parse("#=#=#") == .none, "curl's warm-up frame has no percentage")
+        // 100% ends the bar.
+        precondition(parse("######################################################################## 100.0%") == .finish)
+        // Settled/lingering-file lines end the bar.
+        precondition(parse("Downloaded to: /Users/x/Library/Caches/Homebrew/downloads/abc--file.zip") == .finish)
+        precondition(parse("Already downloaded: /Users/x/Library/Caches/Homebrew/downloads/abc--file.zip") == .finish)
+        // A following non-download step ends the bar.
+        precondition(parse("==> Installing Cask chatgpt") == .finish)
+        // Unrelated lines leave the bar untouched.
+        precondition(parse("chatgpt 26.917.71314 -> 26.924.20706") == .none)
+        precondition(parse("") == .none)
+        // DownloadProgress derives bytes and a readable summary from fraction + total.
+        var dp = DownloadProgress(fileName: "f.zip", fraction: 0.5, totalBytes: nil)
+        precondition(dp.summary == "50%", "Without a size the summary is just the percentage: \(dp.summary)")
+        dp.totalBytes = 27_400_000
+        precondition(dp.downloadedBytes == 13_700_000)
+        precondition(dp.summary == "13.1 MB of 26.1 MB · 50%", "Unexpected summary: \(dp.summary)")
+        precondition(DownloadProgress.format(512) == "512 bytes")
+        precondition(DownloadProgress.format(2048) == "2.0 KB")
+        print("PASS: download progress parsing (start/advance/finish), file-name extraction, byte summary")
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }
         let separated = CommandRunner()

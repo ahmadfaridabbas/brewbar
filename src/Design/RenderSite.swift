@@ -161,7 +161,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     drawAppIcon(NSRect(x: pad, y: top - 54, width: 54, height: 54), t)
     text("BrewBar", NSPoint(x: pad + 66, y: top - 26), size: 22, color: t.ink, weight: .semibold, rounded: true)
     text("A little care for your Homebrew.", NSPoint(x: pad + 66, y: top - 44), size: 13, color: t.muted)
-    text("Version 1.15.1 (17)", NSPoint(x: pad + 66, y: top - 58), size: 10, color: t.muted, weight: .medium)
+    text("Version 1.16 (18)", NSPoint(x: pad + 66, y: top - 58), size: 10, color: t.muted, weight: .medium)
 
     // Right-aligned controls: [•••]  [x Close]  [⏻ Quit]
     var cx = width - pad

@@ -80,6 +80,12 @@ struct BrewAction: Identifiable {
     @Published var awaitingInput = false
     /// The prompt line brew printed (shown next to the Yes/No buttons).
     @Published var promptText = ""
+    /// Live download progress for the console's progress bar. Non-nil only while a file is being
+    /// downloaded; set from parsing brew's `==> Downloading …` / `#### NN.N%` output and cleared
+    /// when the download finishes (or the command moves on / ends).
+    @Published var download: DownloadProgress?
+    /// Identifies the in-flight size lookup so a stale HEAD response can't populate a later download.
+    private var downloadSizeToken = UUID()
     private var environment = ProcessInfo.processInfo.environment
     private var runner: CommandRunner?
     private var activity: NSObjectProtocol?
@@ -138,7 +144,7 @@ struct BrewAction: Identifiable {
         guard ready, !busy, let path = brewPath else { return }
         uninstallCandidate = nil
         busy = true; stopping = false; failed = false; exitCode = nil
-        awaitingInput = false; promptText = ""
+        awaitingInput = false; promptText = ""; clearDownload()
         started = Date(); finished = nil; command = "brew " + arguments.joined(separator: " "); status = "Running"
         pending.removeAll(); truncated = false
         let heading = "[\(Date().formatted(date: .omitted, time: .standard))] $ \(command)\n"
@@ -158,7 +164,7 @@ struct BrewAction: Identifiable {
             self.flush(final: true)
             self.outputTimer?.invalidate(); self.outputTimer = nil
             self.exitCode = code; self.finished = Date(); self.busy = false; self.stopping = false
-            self.awaitingInput = false; self.promptText = ""
+            self.awaitingInput = false; self.promptText = ""; self.clearDownload()
             self.failed = code != 0 && !cancelled
             self.status = cancelled ? "Cancelled" : (code == 0 ? "Succeeded" : "Needs attention")
             while self.output.last == "\n" || self.output.last == "\r" { self.output.removeLast() }
@@ -379,6 +385,7 @@ struct BrewAction: Identifiable {
         text = text.replacingOccurrences(of: "\r\n", with: "\n")
         append(text)
         detectPrompt()
+        detectDownload(in: text)
     }
 
     /// Recognise brew's interactive confirmation (`ohai "Do you want to proceed with the … ? [y/n]"`)
@@ -411,6 +418,55 @@ struct BrewAction: Identifiable {
         awaitingInput = false; promptText = ""
         runner?.send(proceed ? "y" : "n")
     }
+
+    /// Parse the just-flushed `text` line-by-line for brew's download markers and update the
+    /// progress bar. The bar carries only a percentage; the total size is resolved asynchronously
+    /// from the download URL so the console can show "X MB of Y MB". Progress bar lines are rewritten
+    /// in place via carriage returns, so each flush may contain several `\r`-separated bar frames —
+    /// we split on both newlines and carriage returns to catch the latest frame.
+    private func detectDownload(in text: String) {
+        guard busy, !stopping else { return }
+        for raw in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+            switch DownloadProgressParser.parse(line: String(raw)) {
+            case .start(let url, let fileName):
+                download = DownloadProgress(fileName: fileName, fraction: 0, totalBytes: nil)
+                resolveDownloadSize(url: url)
+            case .progress(let fraction):
+                // Only advance a live bar; ignore stray percentages before a Downloading line.
+                if download != nil { download?.fraction = fraction }
+            case .finish:
+                clearDownload()
+            case .none:
+                break
+            }
+        }
+    }
+
+    /// Cancel any pending size lookup and hide the progress bar.
+    private func clearDownload() {
+        downloadSizeToken = UUID()
+        if download != nil { download = nil }
+    }
+
+    /// Resolve the total download size with a lightweight HEAD request so the bar can report bytes.
+    /// Best-effort: on any failure the bar simply shows the percentage. A per-request token guards
+    /// against a slow response landing on a different (later) download.
+    private func resolveDownloadSize(url urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        let token = UUID(); downloadSizeToken = token
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 10
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
+            let length = (response as? HTTPURLResponse)?.expectedContentLength
+                ?? response?.expectedContentLength ?? -1
+            guard length > 0 else { return }
+            Task { @MainActor in
+                guard let self = self, self.downloadSizeToken == token, self.download != nil else { return }
+                self.download?.totalBytes = length
+            }
+        }.resume()
+    }
     /// Appends `text` to `output`, treating a bare carriage return as "move to the start of the
     /// current line and overwrite it". This keeps live progress bars on one line and leaves the
     /// stored `output` clean for the Console view and the Copy button.
@@ -432,7 +488,7 @@ struct BrewAction: Identifiable {
             truncated = true
         }
     }
-    func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; status = "Stopping…"; runner?.cancel() }
-    func clear() { output = ""; pending.removeAll(); truncated = false }
+    func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); status = "Stopping…"; runner?.cancel() }
+    func clear() { output = ""; pending.removeAll(); truncated = false; clearDownload() }
     func copy() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
 }

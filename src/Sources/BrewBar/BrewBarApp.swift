@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.15.1"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.16"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -194,6 +194,10 @@ struct Dashboard: View {
                     .onChange(of: model.follow) { enabled in if enabled { proxy.scrollTo("end", anchor: .bottom) } }
                 }
                 Divider()
+                if let progress = model.download {
+                    DownloadProgressBar(progress: progress, theme: theme)
+                    Divider()
+                }
                 if model.awaitingInput {
                     HStack(spacing: 10) {
                         Image(systemName: "questionmark.circle.fill").foregroundStyle(theme.accent)
@@ -306,5 +310,40 @@ struct ConsoleOutput: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A persistent download progress bar for the console. Shown only while a file is downloading, it
+/// stays visible (tracking brew's live percentage and, when known, the total/downloaded bytes)
+/// until the download finishes — at which point the model clears `download` and the bar disappears.
+struct DownloadProgressBar: View {
+    let progress: DownloadProgress
+    let theme: Theme
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.down.circle.fill").foregroundStyle(theme.accent)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(progress.fileName)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.text)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(progress.fileName)
+                    Spacer(minLength: 8)
+                    Text(progress.summary)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.secondaryText)
+                        .monospacedDigit()
+                }
+                ProgressView(value: progress.fraction)
+                    .progressViewStyle(.linear)
+                    .tint(theme.accent)
+            }
+        }
+        .padding(10)
+        .background(theme.accent.opacity(0.08))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Downloading \(progress.fileName). \(progress.summary).")
+        .accessibilityValue(progress.summary)
     }
 }

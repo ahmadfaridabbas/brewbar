@@ -180,3 +180,11 @@ Two fixes to the v1.15 interactive prompt and the Updates tab:
 Added an interactive-prompt regression test (arms once, answers via the PTY, does not re-arm; yes→exit 0, no→exit 1).
 
 Optimized arm64 build verified; the built bundle reports version 1.15.1 (build 17).
+
+## Version 1.16: Dedicated download progress bar
+
+Downloads now show a **persistent progress bar** in the console instead of only brew's inline `#### NN.N%` text (which, for cask downloads like ChatGPT, often looked stalled after `==> Downloading …`). A dedicated bar sits below the console log while a file is fetching: it shows the file name, a linear `ProgressView`, and — when the size is known — `X MB of Y MB · NN%`. The bar stays visible for the whole download and disappears the moment it finishes, so the user always knows work is in progress rather than guessing whether to keep waiting.
+
+Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressParser` turns brew's PTY output into progress actions — `==> Downloading <url>` starts the bar (and extracts a readable file name, stripping query strings and percent-escapes), each `#### NN.N%` frame advances it, and `100%` / `Downloaded to:` / any following `==>` step ends it. Because brew's bar carries only a percentage, `BrewModel` issues a lightweight `HEAD` request on the download URL to learn the total size and derives the downloaded bytes from the live percentage (best-effort; the bar shows just the percentage if the size can't be fetched). The bar clears on command start/finish, Stop, and Clear, with a per-request token so a slow size lookup can't land on a later download. `BrewBarApp` renders the `DownloadProgressBar` view between the console scrollback and the toolbar. Added parser unit tests (start/advance/finish, file-name extraction, byte-summary formatting).
+
+Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
