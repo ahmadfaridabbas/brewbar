@@ -143,3 +143,11 @@ Optimized arm64 build verified; the built bundle reports version 1.11 (build 12)
 Fixed an intermittent "Could not read Homebrew update data" error that appeared even when `brew outdated --json=v2` exited 0. When Homebrew's API cache is cold it prints `==> Downloading Homebrew API data` to stdout before the JSON payload; that preamble landed in the same capture file and broke the strict JSON decode. Both the updates and installed-package parsers now trim the captured bytes to the outermost JSON object before decoding, tolerating any leading progress lines. Added regression tests covering the preamble case.
 
 Optimized arm64 build verified; the built bundle reports version 1.12 (build 13).
+
+## Version 1.13: Papery themes
+
+The Appearance control expands from three options to five: **System**, **Light**, **Dark**, **Papery Light**, and **Papery Dark**. The two Papery themes are a warmer, stationery-inspired look — Papery Light is a cream/parchment base with dark ink text, Papery Dark is a charcoal-paper base with warm off-white text — both keeping BrewBar's amber accent (a slightly deeper amber on cream for contrast). A faint, static paper grain sits behind the panel content.
+
+Under the hood this adds a real theming layer (`Theme.swift`): an `AppearanceMode` enum (migration-safe — unknown or legacy `"appearance"` values fall back to System) and a `Theme` value threaded through the SwiftUI environment. Views no longer hardcode system materials/colors; backgrounds, surfaces, borders, text, the console, and accents all resolve from the active theme. Papery modes ride on an underlying aqua/darkAqua `NSAppearance` so native controls stay legible, then override the visuals. The Appearance picker became a compact menu popup to fit five options in the 550-pt panel. Added `AppearanceMode`/`Theme` unit tests.
+
+Optimized arm64 build verified; the built bundle reports version 1.13 (build 14).

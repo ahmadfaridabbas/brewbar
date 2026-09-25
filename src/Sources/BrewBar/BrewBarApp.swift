@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.12"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.13"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -81,17 +81,26 @@ struct Dashboard: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: BrewModel
     private var statusColor: Color { model.busy ? .orange : (model.failed ? .red : .green) }
+    private var theme: Theme { Theme.resolve(model.appearanceMode, systemIsDark: colorScheme == .dark) }
+    private var appearanceIcon: String {
+        switch model.appearanceMode {
+        case .paperyLight, .paperyDark: return "doc.plaintext"
+        case .dark: return "moon.fill"
+        case .light: return "sun.max.fill"
+        case .system: return colorScheme == .dark ? "moon.fill" : "sun.max.fill"
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(nsImage: BrandImages.icon(dark: colorScheme == .dark)).resizable().interpolation(.high)
                     .frame(width: 54, height: 54).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("BrewBar").font(.system(size: 22, weight: .semibold, design: .rounded))
-                    Text("A little care for your Homebrew.").foregroundStyle(.secondary)
+                    Text("BrewBar").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(theme.text)
+                    Text("A little care for your Homebrew.").foregroundStyle(theme.secondaryText)
                     Text(AppInfo.versionString)
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(theme.tertiaryText)
                         .accessibilityLabel("App \(AppInfo.versionString)")
                 }
                 Spacer()
@@ -122,14 +131,14 @@ struct Dashboard: View {
                 .accessibilityLabel("Quit BrewBar")
             }
             HStack(spacing: 10) {
-                Label("Appearance", systemImage: colorScheme == .dark ? "moon.fill" : "sun.max.fill")
-                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                Label("Appearance", systemImage: appearanceIcon)
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(theme.secondaryText)
                 Spacer()
                 Picker("Appearance", selection: $model.appearance) {
-                    Text("System").tag("System")
-                    Text("Light").tag("Light")
-                    Text("Dark").tag("Dark")
-                }.pickerStyle(.segmented).frame(width: 240).labelsHidden()
+                    ForEach(AppearanceMode.allCases) { mode in
+                        Text(mode.label).tag(mode.rawValue)
+                    }
+                }.pickerStyle(.menu).fixedSize().labelsHidden()
                     .accessibilityLabel("App appearance")
             }
             Picker("Section", selection: $model.selectedTab) {
@@ -146,16 +155,16 @@ struct Dashboard: View {
                 ForEach(BrewAction.all) { action in
                     Button { model.run(action) } label: {
                         HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: action.icon).font(.system(size: 19)).foregroundStyle(.tint).frame(width: 25, height: 25)
+                            Image(systemName: action.icon).font(.system(size: 19)).foregroundStyle(theme.accent).frame(width: 25, height: 25)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(action.title).font(.system(size: 14, weight: .semibold))
-                                Text(action.detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                                Text("brew \(action.command)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
+                                Text(action.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(theme.text)
+                                Text(action.detail).font(.system(size: 11)).foregroundStyle(theme.secondaryText).fixedSize(horizontal: false, vertical: true)
+                                Text("brew \(action.command)").font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.tertiaryText)
                             }
                             Spacer(minLength: 0)
                         }.frame(maxWidth: .infinity, minHeight: 67, alignment: .leading).padding(11)
-                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.07)))
+                        .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.surfaceBorder))
                         .contentShape(RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain).disabled(model.busy || !model.ready)
                     .opacity(model.busy || !model.ready ? 0.55 : 1)
@@ -166,12 +175,12 @@ struct Dashboard: View {
             }
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    Image(systemName: "terminal")
-                    Text(model.command).font(.system(size: 12, weight: .medium, design: .monospaced)).lineLimit(1).truncationMode(.middle).help(model.command)
+                    Image(systemName: "terminal").foregroundStyle(theme.text)
+                    Text(model.command).font(.system(size: 12, weight: .medium, design: .monospaced)).lineLimit(1).truncationMode(.middle).foregroundStyle(theme.text).help(model.command)
                     Spacer()
                     if model.busy { ProgressView().controlSize(.small).scaleEffect(0.7) }
                     Circle().fill(statusColor).frame(width: 6, height: 6)
-                    Text(model.status).font(.system(size: 11, weight: .medium))
+                    Text(model.status).font(.system(size: 11, weight: .medium)).foregroundStyle(theme.text)
                 }.padding(12)
                 Divider()
                 ScrollViewReader { proxy in
@@ -179,7 +188,7 @@ struct Dashboard: View {
                         VStack(alignment: .leading, spacing: 0) {
                             Text(model.output.isEmpty ? "Choose an action above.\nLive command output will appear here." : model.output)
                                 .font(.system(size: 11, design: .monospaced)).lineSpacing(4)
-                                .foregroundStyle(model.output.isEmpty ? .secondary : .primary)
+                                .foregroundStyle(model.output.isEmpty ? theme.secondaryText : theme.text)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -197,10 +206,10 @@ struct Dashboard: View {
                     Spacer()
                     Button(role: .destructive) { model.stop() } label: { Label(model.stopping ? "Stopping" : "Stop", systemImage: "stop.fill") }
                         .disabled(!model.busy || !model.ready || model.stopping)
-                }.font(.system(size: 11)).controlSize(.small).padding(10)
-            }.background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+                }.font(.system(size: 11)).controlSize(.small).padding(10).foregroundStyle(theme.text)
+            }.background(theme.consoleBackground, in: RoundedRectangle(cornerRadius: 12))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.1)))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.consoleBorder))
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.brewPath ?? "Looking for Homebrew…").font(.system(size: 10, design: .monospaced))
@@ -212,15 +221,56 @@ struct Dashboard: View {
                             else { Text(start, style: .timer) }
                         }.font(.system(size: 10))
                     }
-                }.foregroundStyle(.secondary)
+                }.foregroundStyle(theme.secondaryText)
                 Spacer()
                 if !model.ready && !model.busy { Button("Retry") { model.prepare() } }
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(model.busy ? "Safe to close this panel" : "One command at a time").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Text("MIT License · © 2026 Ahmad Farid Abbas").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text(model.busy ? "Safe to close this panel" : "One command at a time").font(.system(size: 10)).foregroundStyle(theme.secondaryText)
+                    Text("MIT License · © 2026 Ahmad Farid Abbas").font(.system(size: 9)).foregroundStyle(theme.tertiaryText)
                 }
             }
-        }.padding(20).frame(width: 550).background(.regularMaterial)
-        .onChange(of: colorScheme) { scheme in NSApp.applicationIconImage = BrandImages.icon(dark: scheme == .dark) }
+        }.padding(20).frame(width: 550)
+        .background(themeBackground)
+        .environment(\.theme, theme)
+        .tint(theme.accent)
+        .onChange(of: colorScheme) { scheme in model.applyAppearance() }
+    }
+
+    /// The root surface: native modes keep the translucent material; Papery uses a solid paper
+    /// fill with a very faint procedural grain overlay for a stationery feel.
+    @ViewBuilder private var themeBackground: some View {
+        if theme.usesMaterial {
+            Rectangle().fill(.regularMaterial)
+        } else {
+            theme.background.overlay(PaperGrain(opacity: theme.grainOpacity))
+        }
+    }
+}
+
+/// A lightweight, static paper-grain overlay. Rendered once as a stack of faint tiled speckles
+/// via a Canvas so it costs nothing per frame. Kept extremely subtle so text stays crisp.
+struct PaperGrain: View {
+    let opacity: Double
+    var body: some View {
+        Canvas { context, size in
+            var seed: UInt64 = 0x9E3779B97F4A7C15
+            func rand() -> Double {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return Double(seed % 10_000) / 10_000
+            }
+            let count = Int((size.width * size.height) / 900)
+            for _ in 0..<count {
+                let x = rand() * size.width
+                let y = rand() * size.height
+                let s = 0.5 + rand() * 0.8
+                let dark = rand() > 0.5
+                let shade = dark ? Color.black : Color.white
+                context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: s, height: s)),
+                             with: .color(shade.opacity(0.35)))
+            }
+        }
+        .opacity(opacity)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

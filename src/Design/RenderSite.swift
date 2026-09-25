@@ -10,16 +10,78 @@ let resourcesDir = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : 
 
 // MARK: - Palette
 
+enum ThemeStyle { case dark, light, paperyLight, paperyDark }
+
 struct Theme {
-    let dark: Bool
-    var bg: NSColor { dark ? c(0x1E1E20) : c(0xECECE6) }
-    var panel: NSColor { dark ? c(0x2A2A2E) : c(0xFFFFFF) }
-    var card: NSColor { dark ? c(0x323236) : c(0xF6F6F1) }
-    var console: NSColor { dark ? c(0x161618) : c(0xFBFBF7) }
-    var ink: NSColor { dark ? c(0xF4F4EE) : c(0x1B1B1B) }
-    var muted: NSColor { dark ? c(0xA7AAA9) : c(0x6B6E6C) }
-    var line: NSColor { dark ? c(0x3A3A3E) : c(0xDADAD2) }
-    var accent: NSColor { c(0xE0952F) } // amber, matching the app icon
+    let style: ThemeStyle
+    var dark: Bool { style == .dark || style == .paperyDark }
+    var papery: Bool { style == .paperyLight || style == .paperyDark }
+    /// The mode label shown in the Appearance control (matches the app's picker).
+    var appearanceLabel: String {
+        switch style {
+        case .dark: return "Dark"
+        case .light: return "Light"
+        case .paperyLight: return "Papery Light"
+        case .paperyDark: return "Papery Dark"
+        }
+    }
+    var bg: NSColor {
+        switch style {
+        case .dark: return c(0x1E1E20)
+        case .light: return c(0xECECE6)
+        case .paperyLight: return c(0xF4ECD8)
+        case .paperyDark: return c(0x26221C)
+        }
+    }
+    var panel: NSColor {
+        switch style {
+        case .dark: return c(0x2A2A2E)
+        case .light: return c(0xFFFFFF)
+        case .paperyLight: return c(0xFAF5E6)
+        case .paperyDark: return c(0x302A22)
+        }
+    }
+    var card: NSColor {
+        switch style {
+        case .dark: return c(0x323236)
+        case .light: return c(0xF6F6F1)
+        case .paperyLight: return c(0xFAF5E6)
+        case .paperyDark: return c(0x302A22)
+        }
+    }
+    var console: NSColor {
+        switch style {
+        case .dark: return c(0x161618)
+        case .light: return c(0xFBFBF7)
+        case .paperyLight: return c(0xFCF8EE)
+        case .paperyDark: return c(0x1D1A15)
+        }
+    }
+    var ink: NSColor {
+        switch style {
+        case .dark: return c(0xF4F4EE)
+        case .light: return c(0x1B1B1B)
+        case .paperyLight: return c(0x3A3128)
+        case .paperyDark: return c(0xECE3D0)
+        }
+    }
+    var muted: NSColor {
+        switch style {
+        case .dark: return c(0xA7AAA9)
+        case .light: return c(0x6B6E6C)
+        case .paperyLight: return c(0x82735F)
+        case .paperyDark: return c(0xBDB3A0)
+        }
+    }
+    var line: NSColor {
+        switch style {
+        case .dark: return c(0x3A3A3E)
+        case .light: return c(0xDADAD2)
+        case .paperyLight: return c(0xCDBD9E)
+        case .paperyDark: return c(0x4A4234)
+        }
+    }
+    var accent: NSColor { papery && !dark ? c(0xC67C26) : c(0xE0952F) } // deeper amber on cream
     var green: NSColor { c(0x37B24D) }
     var red: NSColor { c(0xD64545) }
 }
@@ -89,6 +151,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bmp)
 
     fill(NSRect(x: 0, y: 0, width: width, height: height), t.bg)
+    if t.papery { drawGrain(NSRect(x: 0, y: 0, width: width, height: height), dark: t.dark) }
 
     let pad: CGFloat = 20
     let panelW = width - pad*2
@@ -98,7 +161,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     drawAppIcon(NSRect(x: pad, y: top - 54, width: 54, height: 54), t)
     text("BrewBar", NSPoint(x: pad + 66, y: top - 26), size: 22, color: t.ink, weight: .semibold, rounded: true)
     text("A little care for your Homebrew.", NSPoint(x: pad + 66, y: top - 44), size: 13, color: t.muted)
-    text("Version 1.12 (13)", NSPoint(x: pad + 66, y: top - 58), size: 10, color: t.muted, weight: .medium)
+    text("Version 1.13 (14)", NSPoint(x: pad + 66, y: top - 58), size: 10, color: t.muted, weight: .medium)
 
     // Right-aligned controls: [•••]  [x Close]  [⏻ Quit]
     var cx = width - pad
@@ -121,19 +184,17 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     symbol("ellipsis.circle", NSRect(x: cx - 20, y: top - 29, width: 20, height: 20), color: t.muted)
     top -= 74
 
-    // Appearance row
+    // Appearance row — a menu-style popup showing the current mode (5 options: System, Light,
+    // Dark, Papery Light, Papery Dark), matching the app's .menu picker.
     text("APPEARANCE", NSPoint(x: pad, y: top - 12), size: 11, color: t.muted, weight: .medium)
-    let segW: CGFloat = 240, segH: CGFloat = 24
-    let segRect = NSRect(x: width - pad - segW, y: top - 22, width: segW, height: segH)
-    fill(segRect, t.card, radius: 6); strokeRect(segRect, t.line, radius: 6)
-    let segLabels = ["System", "Light", "Dark"]
-    for i in 0..<3 {
-        let r = NSRect(x: segRect.minX + CGFloat(i)*segW/3, y: segRect.minY, width: segW/3, height: segH)
-        if i == seg { fill(r.insetBy(dx: 2, dy: 2), t.accent, radius: 5) }
-        let tc = i == seg ? NSColor.white : t.ink
-        text(segLabels[i], NSPoint(x: r.midX - measure(segLabels[i], 12, weight: .medium)/2, y: r.midY - 8),
-             size: 12, color: tc, weight: .medium)
-    }
+    let menuLabel = t.appearanceLabel
+    let menuW: CGFloat = max(120, measure(menuLabel, 12, weight: .medium) + 46)
+    let menuH: CGFloat = 24
+    let menuRect = NSRect(x: width - pad - menuW, y: top - 22, width: menuW, height: menuH)
+    fill(menuRect, t.card, radius: 6); strokeRect(menuRect, t.line, radius: 6)
+    text(menuLabel, NSPoint(x: menuRect.minX + 12, y: menuRect.midY - 8), size: 12, color: t.ink, weight: .medium)
+    // chevron.up.chevron.down affordance
+    symbol("chevron.up.chevron.down", NSRect(x: menuRect.maxX - 22, y: menuRect.midY - 7, width: 11, height: 14), color: t.muted)
     top -= 34
 
     // Tab picker
@@ -274,8 +335,26 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     return bmp
 }
 
-func drawAppIcon(_ rect: NSRect, _ t: Theme) {
-    // Use the real bundled app icon artwork (light/dark variants).
+func drawGrain(_ rect: NSRect, dark: Bool) {
+    // A faint static speckle to suggest paper texture. Deterministic so renders are reproducible.
+    var seed: UInt64 = 0x9E3779B97F4A7C15
+    func rand() -> Double {
+        seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+        return Double(seed % 10_000) / 10_000
+    }
+    let count = Int((rect.width * rect.height) / 260)
+    for _ in 0..<count {
+        let x = rect.minX + rand() * rect.width
+        let y = rect.minY + rand() * rect.height
+        let s = 0.5 + rand() * 0.9
+        let light = rand() > 0.5
+        let shade = light ? NSColor.white : NSColor.black
+        shade.withAlphaComponent(dark ? 0.03 : 0.035).setFill()
+        NSBezierPath(ovalIn: NSRect(x: x, y: y, width: s, height: s)).fill()
+    }
+}
+
+func drawAppIcon(_ rect: NSRect, _ t: Theme) {    // Use the real bundled app icon artwork (light/dark variants).
     let name = t.dark ? "AppIconDark" : "AppIconLight"
     let path = "\(resourcesDir)/\(name).png"
     if let img = NSImage(contentsOfFile: path) {
@@ -300,8 +379,10 @@ func save(_ bmp: NSBitmapImageRep, _ path: String) {
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "docs/assets"
 try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
 
-let dark = Theme(dark: true)
-let light = Theme(dark: false)
+let dark = Theme(style: .dark)
+let light = Theme(style: .light)
+let paperyLight = Theme(style: .paperyLight)
+let paperyDark = Theme(style: .paperyDark)
 let W: CGFloat = 560, H: CGFloat = 680
 
 save(renderDashboard(width: W, height: H, theme: dark, tab: .maintenance, seg: 2), "\(out)/hero.png")
@@ -315,3 +396,7 @@ save(renderDashboard(width: W, height: H, theme: dark, tab: .installed, seg: 2),
 save(renderDashboard(width: W, height: H, theme: dark, tab: .updates, seg: 2), "\(out)/updates.png")
 save(renderDashboard(width: W, height: H, theme: dark, tab: .console, running: true, seg: 2), "\(out)/console.png")
 save(renderDashboard(width: W, height: H, theme: light, tab: .updates, seg: 1), "\(out)/updates-light.png")
+// Papery theme showcase
+save(renderDashboard(width: W, height: H, theme: paperyLight, tab: .maintenance, seg: 3), "\(out)/papery-light.png")
+save(renderDashboard(width: W, height: H, theme: paperyDark, tab: .maintenance, seg: 4), "\(out)/papery-dark.png")
+save(renderDashboard(width: W, height: H, theme: paperyLight, tab: .updates, seg: 3), "\(out)/papery-updates.png")

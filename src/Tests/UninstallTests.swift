@@ -22,6 +22,23 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fixture.path)
         let model = BrewModel(prepareOnLaunch: false)
         model.ready = true; model.brewPath = fixture.path
+
+        // Appearance: the five modes parse from their raw strings, unknown/legacy values fall back
+        // to System, and each maps to the expected underlying scheme + Papery theme selection.
+        precondition(AppearanceMode("System") == .system && AppearanceMode("Light") == .light && AppearanceMode("Dark") == .dark)
+        precondition(AppearanceMode("Papery Light") == .paperyLight && AppearanceMode("Papery Dark") == .paperyDark)
+        precondition(AppearanceMode("nonsense") == .system, "Unknown appearance must fall back to System")
+        precondition(AppearanceMode.system.underlyingScheme == nil)
+        precondition(AppearanceMode.paperyLight.underlyingScheme == .light && AppearanceMode.paperyDark.underlyingScheme == .dark)
+        precondition(AppearanceMode.paperyLight.isPapery && AppearanceMode.paperyDark.isDarkPaper && !AppearanceMode.light.isPapery)
+        precondition(Theme.resolve(.paperyLight, systemIsDark: false).usesMaterial == false)
+        precondition(Theme.resolve(.paperyDark, systemIsDark: false).usesMaterial == false)
+        precondition(Theme.resolve(.system, systemIsDark: true).usesMaterial == true)
+        model.appearance = "Papery Dark"
+        precondition(model.appearanceMode == .paperyDark && model.preferredScheme == .dark)
+        model.appearance = "System"
+        precondition(model.preferredScheme == nil)
+
         func package(_ token: String) -> InstalledPackage {
             InstalledPackage(token: token, name: token, detail: "Fixture", version: "1", kind: "Formula")
         }

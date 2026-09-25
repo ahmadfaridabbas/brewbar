@@ -21,11 +21,24 @@ struct BrewAction: Identifiable {
     @Published var appearance = UserDefaults.standard.string(forKey: "appearance") ?? "System" {
         didSet { UserDefaults.standard.set(appearance, forKey: "appearance"); applyAppearance() }
     }
-    var preferredScheme: ColorScheme? { appearance == "Dark" ? .dark : (appearance == "Light" ? .light : nil) }
+    var appearanceMode: AppearanceMode { AppearanceMode(appearance) }
+    /// The color scheme forced on the SwiftUI hierarchy. Papery modes still force their
+    /// underlying light/dark so native controls stay legible; the Theme overrides the visuals.
+    var preferredScheme: ColorScheme? { appearanceMode.underlyingScheme }
     func applyAppearance() {
-        NSApp.appearance = appearance == "System" ? nil : NSAppearance(named: appearance == "Dark" ? .darkAqua : .aqua)
-        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        NSApp.applicationIconImage = BrandImages.icon(dark: dark)
+        let mode = appearanceMode
+        // `NSApp` is an implicitly-unwrapped optional and is nil before NSApplication is set up
+        // (e.g. in headless unit tests). Guard so the model stays usable without a running app.
+        guard let app = NSApplication.shared as NSApplication? else { return }
+        // System uses the OS appearance; every other mode (including Papery) pins aqua/darkAqua.
+        switch mode.underlyingScheme {
+        case .some(.dark): app.appearance = NSAppearance(named: .darkAqua)
+        case .some(.light): app.appearance = NSAppearance(named: .aqua)
+        default: app.appearance = nil
+        }
+        let dark = app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        // Papery uses its own paper icon tone: dark paper -> dark icon, cream -> light icon.
+        app.applicationIconImage = BrandImages.icon(dark: mode.isPapery ? mode.isDarkPaper : dark)
     }
     @Published var updates: [PackageUpdate] = []
     @Published var updateSearch = ""
