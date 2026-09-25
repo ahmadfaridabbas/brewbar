@@ -55,6 +55,14 @@ struct BrewAction: Identifiable {
     @Published var inventoryError: String?
     @Published var loadingInventory = false
     @Published var uninstallCandidate: InstalledPackage?
+    // Search & Install (a mode toggle inside the Installed tab).
+    @Published var installedTabMode = "Installed"     // "Installed" | "Search"
+    @Published var searchQuery = ""
+    @Published var searchResults: [SearchResult] = []
+    @Published var searching = false
+    @Published var searchError: String?
+    @Published var searchPerformed = false
+    @Published var installCandidate: SearchResult?
     @Published var follow = true
     @Published var output = ""
     @Published var status = "Preparing environment…"
@@ -203,6 +211,77 @@ struct BrewAction: Identifiable {
         }
     }
 
+    /// Run `brew search <query>`, then enrich the candidate tokens via `brew info --json=v2` so each
+    /// result shows a description, version, kind, and whether it is already installed. Two chained
+    /// commands: the info call is issued from the search completion (busy is clear again by then).
+    private let searchResultLimit = 40
+    func searchPackages(_ rawQuery: String) {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ready, !busy, query.count >= 2,
+              query.range(of: "^[A-Za-z0-9][A-Za-z0-9@+._/ -]*$", options: .regularExpression) != nil else {
+            if query.count < 2 { searchError = "Type at least two characters to search." }
+            return
+        }
+        searching = true; searchError = nil; searchResults = []; searchPerformed = true
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("BrewBar-search-\(UUID().uuidString).txt")
+        execute(arguments: ["search", query], standardOutputFile: file) { [weak self] code, cancelled in
+            guard let self = self else { return }
+            defer { try? FileManager.default.removeItem(at: file) }
+            guard code == 0 && !cancelled else {
+                self.searching = false
+                self.searchError = cancelled ? "Search cancelled." : "Search failed. See the console and retry."
+                return
+            }
+            let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            let tokens = Array(SearchResult.searchTokens(text).prefix(self.searchResultLimit))
+            guard !tokens.isEmpty else {
+                self.searching = false
+                self.searchError = "No formula or cask found for “\(query)”."
+                return
+            }
+            self.enrich(tokens: tokens, query: query)
+        }
+    }
+
+    /// Second stage: `brew info --json=v2 <tokens>` → rich SearchResults.
+    private func enrich(tokens: [String], query: String) {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("BrewBar-info-\(UUID().uuidString).json")
+        execute(arguments: ["info", "--json=v2"] + tokens, standardOutputFile: file, preserveOutput: true) { [weak self] code, cancelled in
+            guard let self = self else { return }
+            defer { try? FileManager.default.removeItem(at: file) }
+            self.searching = false
+            guard code == 0 && !cancelled else {
+                self.searchError = cancelled ? "Search cancelled." : "Could not read package details. See the console and retry."
+                return
+            }
+            do {
+                self.searchResults = try SearchResult.parse(Data(contentsOf: file))
+                if self.searchResults.isEmpty { self.searchError = "No installable formula or cask found for “\(query)”." }
+                self.append("Found \(self.searchResults.count) installable packages for “\(query)”.\n")
+            } catch {
+                self.searchError = "Homebrew returned unreadable search details. Try again."
+            }
+        }
+    }
+
+    func install(_ result: SearchResult) {
+        guard !busy, ready, result.valid, !result.installed else { return }
+        installCandidate = nil
+        execute(arguments: result.installArguments) { [weak self] code, cancelled in
+            guard let self = self else { return }
+            self.inventoryStale = true; self.updatesStale = true
+            if code == 0 && !cancelled {
+                // Reflect the new state in the results list immediately…
+                if let idx = self.searchResults.firstIndex(where: { $0.id == result.id }) {
+                    let r = self.searchResults[idx]
+                    self.searchResults[idx] = SearchResult(token: r.token, name: r.name, detail: r.detail,
+                                                           version: r.version, kind: r.kind, installed: true)
+                }
+                // …and auto-refresh the installed inventory so the Installed list is accurate.
+                self.refreshInstalled()
+            }
+        }
+    }
 
     func loadUpdatesIfNeeded() {
         if !updatesLoaded && !busy && ready { checkUpdates() }

@@ -136,7 +136,7 @@ let actions = [
     Action(symbol: "stethoscope", title: "Doctor", detail: "Check configuration & system health", command: "doctor"),
 ]
 
-enum Tab { case maintenance, installed, updates, console }
+enum Tab { case maintenance, installed, search, updates, console }
 
 // MARK: - Dashboard render
 
@@ -161,7 +161,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     drawAppIcon(NSRect(x: pad, y: top - 54, width: 54, height: 54), t)
     text("BrewBar", NSPoint(x: pad + 66, y: top - 26), size: 22, color: t.ink, weight: .semibold, rounded: true)
     text("A little care for your Homebrew.", NSPoint(x: pad + 66, y: top - 44), size: 13, color: t.muted)
-    text("Version 1.13 (14)", NSPoint(x: pad + 66, y: top - 58), size: 10, color: t.muted, weight: .medium)
+    text("Version 1.14 (15)", NSPoint(x: pad + 66, y: top - 58), size: 10, color: t.muted, weight: .medium)
 
     // Right-aligned controls: [•••]  [x Close]  [⏻ Quit]
     var cx = width - pad
@@ -202,7 +202,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     let tabRect = NSRect(x: pad, y: top - tabH, width: tabW, height: tabH)
     fill(tabRect, t.card, radius: 6); strokeRect(tabRect, t.line, radius: 6)
     let tabs = ["Maintenance", "Installed", "Updates (7)"]
-    let activeTab = tab == .installed ? 1 : (tab == .updates ? 2 : 0)
+    let activeTab = (tab == .installed || tab == .search) ? 1 : (tab == .updates ? 2 : 0)
     for i in 0..<3 {
         let r = NSRect(x: tabRect.minX + CGFloat(i)*tabW/3, y: tabRect.minY, width: tabW/3, height: tabH)
         let w: NSFont.Weight = i == activeTab ? .semibold : .regular
@@ -252,6 +252,52 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
             let ub = NSRect(x: rr.maxX - 84, y: rr.midY - 11, width: 74, height: 22)
             strokeRect(ub, t.line, radius: 6)
             text("Uninstall", NSPoint(x: ub.minX + 8, y: ub.midY - 7), size: 11, color: t.ink)
+            top -= 54
+        }
+        top -= 6
+    case .search:
+        // Mode toggle inside the Installed tab: Installed | Search & Install (search active).
+        let segH: CGFloat = 24
+        let segRect = NSRect(x: pad, y: top - segH, width: panelW, height: segH)
+        fill(segRect, t.card, radius: 6); strokeRect(segRect, t.line, radius: 6)
+        let segLabels = ["Installed", "Search & Install"]
+        for i in 0..<2 {
+            let r = NSRect(x: segRect.minX + CGFloat(i)*panelW/2, y: segRect.minY, width: panelW/2, height: segH)
+            let active = i == 1
+            if active { fill(r.insetBy(dx: 2, dy: 2), t.panel, radius: 5); strokeRect(r.insetBy(dx: 2, dy: 2), t.line, radius: 5) }
+            text(segLabels[i], NSPoint(x: r.midX - measure(segLabels[i], 12, weight: active ? .semibold : .regular)/2, y: r.midY - 8),
+                 size: 12, color: t.ink, weight: active ? .semibold : .regular)
+        }
+        top -= 34
+        // Query field
+        let sf = NSRect(x: pad, y: top - 26, width: panelW, height: 26)
+        fill(sf, t.card, radius: 7); strokeRect(sf, t.line, radius: 7)
+        symbol("magnifyingglass", NSRect(x: pad + 8, y: sf.midY - 7, width: 13, height: 13), color: t.muted)
+        text("ripgrep", NSPoint(x: pad + 28, y: sf.midY - 7), size: 12, color: t.ink)
+        top -= 34
+        text("4 results", NSPoint(x: pad, y: top - 12), size: 10, color: t.muted, weight: .medium)
+        top -= 22
+        // (name, desc, version, kind, installed)
+        let rows: [(String, String, String, String, Bool)] = [
+            ("ripgrep", "Search tool that recursively searches directories", "14.1.1", "Formula", false),
+            ("ripgrep-all", "Wrapper around ripgrep for PDFs, e-books, more", "0.10.6", "Formula", false),
+            ("the_silver_searcher", "Code-search tool similar to ack", "2.2.0", "Formula", true),
+            ("bat", "Clone of cat with syntax highlighting", "0.24.0", "Formula", false)]
+        for r in rows {
+            let rr = NSRect(x: pad, y: top - 46, width: panelW, height: 46)
+            fill(rr, t.card, radius: 10); strokeRect(rr, t.line, radius: 10)
+            symbol("shippingbox.fill", NSRect(x: pad + 12, y: rr.midY - 9, width: 18, height: 18), color: t.accent)
+            text(r.0, NSPoint(x: pad + 40, y: rr.maxY - 20), size: 14, color: t.ink, weight: .semibold)
+            text(r.1, NSPoint(x: pad + 40, y: rr.maxY - 38), size: 10, color: t.muted)
+            text("\(r.3) · \(r.2)", NSPoint(x: rr.maxX - 210, y: rr.midY - 7), size: 10, color: t.muted, mono: true)
+            if r.4 {
+                symbol("checkmark.circle.fill", NSRect(x: rr.maxX - 96, y: rr.midY - 7, width: 13, height: 13), color: t.accent)
+                text("Installed", NSPoint(x: rr.maxX - 80, y: rr.midY - 7), size: 11, color: t.accent, weight: .medium)
+            } else {
+                let ib = NSRect(x: rr.maxX - 74, y: rr.midY - 11, width: 64, height: 22)
+                fill(ib, t.accent.withAlphaComponent(0.16), radius: 6)
+                text("Install", NSPoint(x: ib.minX + 12, y: ib.midY - 7), size: 11, color: t.accent, weight: .medium)
+            }
             top -= 54
         }
         top -= 6
@@ -396,6 +442,10 @@ save(renderDashboard(width: W, height: H, theme: dark, tab: .installed, seg: 2),
 save(renderDashboard(width: W, height: H, theme: dark, tab: .updates, seg: 2), "\(out)/updates.png")
 save(renderDashboard(width: W, height: H, theme: dark, tab: .console, running: true, seg: 2), "\(out)/console.png")
 save(renderDashboard(width: W, height: H, theme: light, tab: .updates, seg: 1), "\(out)/updates-light.png")
+// Search & Install (new in v1.14)
+save(renderDashboard(width: W, height: H, theme: dark, tab: .search, seg: 2), "\(out)/view-search.png")
+save(renderDashboard(width: W, height: H, theme: dark, tab: .search, seg: 2), "\(out)/search.png")
+save(renderDashboard(width: W, height: H, theme: paperyLight, tab: .search, seg: 3), "\(out)/search-papery.png")
 // Papery theme showcase
 save(renderDashboard(width: W, height: H, theme: paperyLight, tab: .maintenance, seg: 3), "\(out)/papery-light.png")
 save(renderDashboard(width: W, height: H, theme: paperyDark, tab: .maintenance, seg: 4), "\(out)/papery-dark.png")

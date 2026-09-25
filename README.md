@@ -24,6 +24,7 @@ Gallery images are native offscreen renders of BrewBar's interface, produced fro
 ## Features
 
 - Native SwiftUI `MenuBarExtra` panel with no Dock icon.
+- **Search & Install:** search all of Homebrew from the Installed tab — each result shows its description, version, and installed-state — and install formulae or casks with a confirmation. The installed list refreshes automatically.
 - System / Light / Dark plus **Papery Light** and **Papery Dark** themes, saved across launches, with matching artwork.
 - A visible version line and Close / Quit controls in the header. Close tucks the panel away while BrewBar stays in the menu bar; Quit is blocked while a command is running.
 - Live, streaming, noninteractive console with bounded retention, Copy, Clear, and Follow.
@@ -31,7 +32,7 @@ Gallery images are native offscreen renders of BrewBar's interface, produced fro
 
 ## Install
 
-1. Download and extract [BrewBar-1.13.zip](docs/downloads/BrewBar-1.13.zip).
+1. Download and extract [BrewBar-1.14.zip](docs/downloads/BrewBar-1.14.zip).
 2. Drag `BrewBar.app` to Applications, then right-click → Open the first time.
 3. Click the Terminal Mug glyph in the menu bar to open the panel.
 

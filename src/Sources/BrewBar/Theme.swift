@@ -67,7 +67,10 @@ struct Theme {
             accent: Color(red: 0.878, green: 0.584, blue: 0.184), // #e0952f
             consoleBackground: Color(nsColor: .textBackgroundColor),
             consoleBorder: .primary.opacity(0.1),
-            warning: .orange,
+            // The system `.orange` (#FF9500) is too light to read on white/light backgrounds.
+            // Use a darker burnt-orange on light, and the brighter orange on dark.
+            warning: dark ? Color(red: 1.0, green: 0.624, blue: 0.235)   // #FF9F3C
+                          : Color(red: 0.700, green: 0.365, blue: 0.0),  // #B35D00
             grainOpacity: 0
         )
     }

@@ -62,6 +62,30 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { model.stop() }
         pump { !model.busy }
         precondition(model.status == "Cancelled" && model.packages.contains(slow))
+
+        // Install: confirmation selection doesn't launch; install runs the right typed arguments;
+        // already-installed results are guarded; concurrent installs are ignored.
+        let newFormula = SearchResult(token: "ripgrep", name: "ripgrep", detail: "Search tool", version: "14.1", kind: "Formula", installed: false)
+        let newCask = SearchResult(token: "iterm2", name: "iTerm2", detail: "Terminal", version: "3.5", kind: "App", installed: false)
+        let already = SearchResult(token: "wget", name: "wget", detail: "", version: "1", kind: "Formula", installed: true)
+        precondition(newFormula.installArguments == ["install", "--formula", "ripgrep"])
+        precondition(newCask.installArguments == ["install", "--cask", "iterm2"])
+        model.searchResults = [newFormula, newCask, already]
+        model.installCandidate = newFormula
+        precondition(!model.busy)                          // selecting a candidate must not launch
+        model.install(already)                             // already-installed guard: no launch
+        precondition(!model.busy)
+        model.install(newFormula)
+        precondition(model.busy && model.installCandidate == nil)
+        model.install(newCask)                             // concurrent install ignored
+        // install() triggers an auto-refresh (a second brew command) on success, which resets the
+        // console; wait for the result to reflect installed AND the model to be idle. The successful
+        // installed-state flip proves the install command completed with exit 0.
+        pump { !model.busy && model.searchResults.first { $0.token == "ripgrep" }?.installed == true }
+        precondition(model.inventoryStale && model.updatesStale)
+        precondition(!model.searchResults.first { $0.token == "iterm2" }!.installed)  // concurrent install was ignored
+        print("PASS: install selection/guard, typed install arguments, concurrency, installed-state update")
+
         for action in BrewAction.all {
             model.run(action)
             pump { !model.busy }

@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.13"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.14"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -186,12 +186,7 @@ struct Dashboard: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(model.output.isEmpty ? "Choose an action above.\nLive command output will appear here." : model.output)
-                                .font(.system(size: 11, design: .monospaced)).lineSpacing(4)
-                                .foregroundStyle(model.output.isEmpty ? theme.secondaryText : theme.text)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
+                            ConsoleOutput(output: model.output, theme: theme)
                             Color.clear.frame(height: 1).id("end")
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     }.frame(height: 140)
@@ -272,5 +267,22 @@ struct PaperGrain: View {
         .opacity(opacity)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+/// The console's scrolling text. Extracted into its own view so the type-checker doesn't choke on
+/// the empty-state ternary combined with theme colors.
+struct ConsoleOutput: View {
+    let output: String
+    let theme: Theme
+    private var isEmpty: Bool { output.isEmpty }
+    private var text: String { isEmpty ? "Choose an action above.\nLive command output will appear here." : output }
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, design: .monospaced)).lineSpacing(4)
+            .foregroundStyle(isEmpty ? theme.secondaryText : theme.text)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

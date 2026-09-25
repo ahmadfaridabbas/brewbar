@@ -56,6 +56,32 @@ import Darwin
         precondition(!InstalledPackage(token: "--force", name: "bad", detail: "", version: "", kind: "Formula").canUninstall)
         do { _ = try InstalledPackage.parse(Data("bad JSON".utf8)); preconditionFailure("Malformed JSON accepted") } catch {}
         precondition(try! InstalledPackage.parse(Data(#"{"formulae":[],"casks":[]}"#.utf8)).isEmpty)
+
+        // SearchResult: brew info --json=v2 enrichment yields kind, desc, version, and installed-state.
+        let searchFixture = Data(#"""
+        {"formulae":[{"name":"wget","full_name":"wget","desc":"Internet file retriever","versions":{"stable":"1.25.0"},"installed":[]},
+                     {"name":"node","full_name":"node","desc":"JS runtime","versions":{"stable":"22.14.0"},"installed":[{"version":"22.14.0"}]}],
+         "casks":[{"token":"google-chrome","full_token":"google-chrome","name":["Google Chrome"],"desc":"Web browser","version":"154.0","installed":"154.0"},
+                  {"token":"iterm2","full_token":"iterm2","name":["iTerm2"],"desc":"Terminal","version":"3.5","installed":null}]}
+        """#.utf8)
+        let results = try! SearchResult.parse(searchFixture)
+        precondition(results.count == 4)
+        let wget = results.first { $0.token == "wget" }!
+        precondition(wget.kind == "Formula" && !wget.installed && wget.version == "1.25.0")
+        precondition(wget.installArguments == ["install", "--formula", "wget"])
+        precondition(results.first { $0.token == "node" }!.installed)          // installed[] non-empty
+        let chrome = results.first { $0.token == "google-chrome" }!
+        precondition(chrome.kind == "App" && chrome.installed && chrome.installArguments == ["install", "--cask", "google-chrome"])
+        precondition(!results.first { $0.token == "iterm2" }!.installed)       // installed == null
+        // Progress preamble tolerance on the info stage too.
+        let noisySearch = Data(("==> Downloading Homebrew API data\n" + #"{"formulae":[{"name":"jq","versions":{"stable":"1.7"},"installed":[]}],"casks":[]}"#).utf8)
+        precondition(try! SearchResult.parse(noisySearch).count == 1)
+        // Invalid token is rejected by `valid`.
+        precondition(!SearchResult(token: "--build-from-source", name: "x", detail: "", version: "1", kind: "Formula", installed: false).valid)
+        // brew search plain-text token extraction skips headers/warnings/blank lines.
+        let tokens = SearchResult.searchTokens("==> Formulae\nwget\nwget2\n\nWarning: nothing\nnode\n")
+        precondition(tokens == ["wget", "wget2", "node"], "Unexpected search tokens: \(tokens)")
+        print("PASS: search result parsing (kind, version, installed-state), install arguments, token extraction")
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }
         let separated = CommandRunner()
