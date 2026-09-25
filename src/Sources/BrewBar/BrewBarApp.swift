@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.14"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.15"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -194,6 +194,28 @@ struct Dashboard: View {
                     .onChange(of: model.follow) { enabled in if enabled { proxy.scrollTo("end", anchor: .bottom) } }
                 }
                 Divider()
+                if model.awaitingInput {
+                    HStack(spacing: 10) {
+                        Image(systemName: "questionmark.circle.fill").foregroundStyle(theme.accent)
+                        Text(model.promptText)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.text).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button { model.answer(false) } label: { Text("No") }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .keyboardShortcut(.cancelAction)
+                            .help("Send “n” — abort the command")
+                        Button { model.answer(true) } label: { Text("Yes") }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                            .keyboardShortcut(.defaultAction)
+                            .help("Send “y” — proceed")
+                    }
+                    .font(.system(size: 11)).padding(10)
+                    .background(theme.accent.opacity(0.10))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(model.promptText). Press Yes to proceed or No to abort.")
+                    Divider()
+                }
                 HStack(spacing: 12) {
                     Button { model.copy() } label: { Label("Copy", systemImage: "doc.on.doc") }.disabled(model.output.isEmpty).help("Copy visible output")
                     Button { model.clear() } label: { Label("Clear", systemImage: "trash") }.disabled(model.output.isEmpty)

@@ -75,6 +75,11 @@ struct BrewAction: Identifiable {
     @Published var started: Date?
     @Published var finished: Date?
     @Published var failed = false
+    /// True while the running command is blocked on an interactive `[y/n]` prompt (e.g. brew's
+    /// upgrade/install confirmation). The console then offers Yes/No buttons wired to `answer(_:)`.
+    @Published var awaitingInput = false
+    /// The prompt line brew printed (shown next to the Yes/No buttons).
+    @Published var promptText = ""
     private var environment = ProcessInfo.processInfo.environment
     private var runner: CommandRunner?
     private var activity: NSObjectProtocol?
@@ -133,6 +138,7 @@ struct BrewAction: Identifiable {
         guard ready, !busy, let path = brewPath else { return }
         uninstallCandidate = nil
         busy = true; stopping = false; failed = false; exitCode = nil
+        awaitingInput = false; promptText = ""
         started = Date(); finished = nil; command = "brew " + arguments.joined(separator: " "); status = "Running"
         pending.removeAll(); truncated = false
         let heading = "[\(Date().formatted(date: .omitted, time: .standard))] $ \(command)\n"
@@ -152,6 +158,7 @@ struct BrewAction: Identifiable {
             self.flush(final: true)
             self.outputTimer?.invalidate(); self.outputTimer = nil
             self.exitCode = code; self.finished = Date(); self.busy = false; self.stopping = false
+            self.awaitingInput = false; self.promptText = ""
             self.failed = code != 0 && !cancelled
             self.status = cancelled ? "Cancelled" : (code == 0 ? "Succeeded" : "Needs attention")
             while self.output.last == "\n" || self.output.last == "\r" { self.output.removeLast() }
@@ -359,6 +366,38 @@ struct BrewAction: Identifiable {
         text = text.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
         text = text.replacingOccurrences(of: "\r\n", with: "\n")
         append(text)
+        detectPrompt()
+    }
+
+    /// Recognise brew's interactive confirmation (`ohai "Do you want to proceed with the … ? [y/n]"`)
+    /// so the console can offer Yes/No. brew only prompts when both stdin and stdout are a TTY, which
+    /// is exactly the PTY path; JSON/file captures (search, info, outdated) never prompt. Matching a
+    /// trailing `[y/n]` / `(y/N)` at the end of the current output keeps it robust to future wording.
+    private func detectPrompt() {
+        guard busy, !stopping else { return }
+        let tail = output.suffix(400)
+        let waiting = tail.range(of: "\\[y/n\\]|\\(y/N\\)|\\? \\[Y/n\\]",
+                                 options: [.regularExpression, .caseInsensitive]) != nil
+        if waiting {
+            if !awaitingInput {
+                awaitingInput = true
+                // Show the last non-empty line as the prompt label.
+                promptText = output.split(separator: "\n").last.map(String.init) ?? "Do you want to proceed? [y/n]"
+            }
+        } else if awaitingInput {
+            // brew has moved on (e.g. it echoed our answer and started working).
+            awaitingInput = false; promptText = ""
+        }
+    }
+
+    /// Answer a pending `[y/n]` prompt. brew reads a single character via `$stdin.getch`, so we send
+    /// one byte (no newline). "n" makes brew `exit 1`, which our completion reports as cancelled-ish
+    /// (non-zero exit) — the console shows "Needs attention" with the abort noted by brew itself.
+    func answer(_ proceed: Bool) {
+        guard busy, awaitingInput else { return }
+        awaitingInput = false
+        append(proceed ? "y\n" : "n\n")
+        runner?.send(proceed ? "y" : "n")
     }
     /// Appends `text` to `output`, treating a bare carriage return as "move to the start of the
     /// current line and overwrite it". This keeps live progress bars on one line and leaves the
@@ -381,7 +420,7 @@ struct BrewAction: Identifiable {
             truncated = true
         }
     }
-    func stop() { guard busy else { return }; stopping = true; status = "Stopping…"; runner?.cancel() }
+    func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; status = "Stopping…"; runner?.cancel() }
     func clear() { output = ""; pending.removeAll(); truncated = false }
     func copy() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
 }

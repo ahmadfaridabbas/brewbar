@@ -7,6 +7,9 @@ final class CommandRunner {
     private let lock = NSLock()
     private var pid: pid_t = 0
     private var cancelled = false
+    /// The PTY master fd while a PTY-backed command runs (-1 otherwise). Writing to it delivers
+    /// keystrokes to the child's controlling terminal, e.g. answering brew's `[y/n]` prompt.
+    private var inputFD: Int32 = -1
 
     /// When `usePTY` is true (and no `standardOutputFile` is set) the child is attached to a
     /// pseudo-terminal so tools like brew detect an interactive TTY and emit live progress bars.
@@ -71,7 +74,7 @@ final class CommandRunner {
             var child: pid_t = 0
             self.lock.lock()
             let error = posix_spawn(&child, executable, &actions, &attributes, argv, envp)
-            if error == 0 { self.pid = child }
+            if error == 0 { self.pid = child; if pty { self.inputFD = fds[0] } }
             let wasCancelled = self.cancelled
             self.lock.unlock()
             close(fds[1])
@@ -91,6 +94,7 @@ final class CommandRunner {
                 } else if count < 0 && errno == EINTR { continue }
                 else { break }
             }
+            self.lock.lock(); self.inputFD = -1; self.lock.unlock()
             close(fds[0])
             var status: Int32 = 0
             while waitpid(child, &status, 0) < 0 && errno == EINTR {}
@@ -101,6 +105,26 @@ final class CommandRunner {
             let signal = status & 0x7f
             let code = signal == 0 ? (status >> 8) & 0xff : 128 + signal
             DispatchQueue.main.async { completion(code, stopped) }
+        }
+    }
+
+    /// Write `text` to the child's controlling terminal (PTY master). Used to answer interactive
+    /// prompts such as brew's `Do you want to proceed? [y/n]`. No-op if there is no live PTY.
+    /// brew reads the answer with `$stdin.getch` (a single character, no newline required).
+    func send(_ text: String) {
+        lock.lock()
+        let fd = inputFD
+        lock.unlock()
+        guard fd >= 0 else { return }
+        let bytes = Array(text.utf8)
+        bytes.withUnsafeBytes { raw in
+            var offset = 0
+            while offset < raw.count {
+                let written = write(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                if written > 0 { offset += written }
+                else if written < 0 && errno == EINTR { continue }
+                else { break }
+            }
         }
     }
 
@@ -138,6 +162,10 @@ struct BrewEnvironment {
         env["HOMEBREW_NO_COLOR"] = "1"
         env["HOMEBREW_NO_ENV_HINTS"] = "1"
         env["NONINTERACTIVE"] = "1"
+        // NOTE: we intentionally do NOT set HOMEBREW_NO_ASK. Homebrew 7+ defaults `brew upgrade`/
+        // `install` to "ask mode" (a `Do you want to proceed? [y/n]` confirmation). BrewBar keeps
+        // that prompt and answers it interactively: the console detects the prompt and shows Yes/No
+        // buttons that write a single `y`/`n` byte to the command's PTY (see CommandRunner.send).
         // Download sequentially so brew prints a single-line "####  100%" progress bar. The newer
         // parallel download queue draws a multi-line animated spinner that a scrollback console
         // (plain Text, no cursor addressing) cannot render cleanly.

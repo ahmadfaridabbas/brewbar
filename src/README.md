@@ -159,3 +159,13 @@ The Installed tab gains a mode toggle — **Installed** and **Search & Install**
 New `SearchResult` model + parser (reuses the v1.12 `JSONExtraction` preamble tolerance). Also fixed the warning/stale text color, which used the system `.orange` (`#FF9500`) and was hard to read on light backgrounds — it's now a darker burnt-orange (`#B35D00`) on light and a brighter amber-orange (`#FF9F3C`) on dark. Added search-parse and install-argument unit tests.
 
 Optimized arm64 build verified; the built bundle reports version 1.14 (build 15).
+
+## Version 1.15: Answer Homebrew's upgrade/install prompt
+
+Homebrew 7 defaults `brew upgrade` and `brew install` to an "ask mode" that prints a summary and then waits for a `Do you want to proceed? [y/n]` confirmation. Because BrewBar runs brew under a pseudo-terminal (so it can show a live progress bar), brew saw a TTY, printed the prompt, and blocked forever — nothing ever answered it, so the command sat on "Running".
+
+BrewBar now answers that prompt interactively. When brew asks, the console shows the question with **Yes** and **No** buttons (Return = Yes, Escape = No). The runner keeps the PTY master open and writes a single `y`/`n` character to it — matching brew's `$stdin.getch` read (no newline needed). Yes proceeds; No makes brew abort (`exit 1`), reported as "Needs attention". Stop still force-stops the process group.
+
+Implementation: `CommandRunner` gained a `send(_:)` that writes to the PTY master (tracked as `inputFD`, cleared under lock when the fd closes). `BrewModel` detects the trailing `[y/n]`/`(y/N)` in the live output (`detectPrompt()`), exposes `awaitingInput`/`promptText`, and `answer(_:)` echoes the choice and forwards it to the runner. The prompt state clears on new command, completion, and Stop. JSON/file captures (search, info, outdated) never prompt because they don't use the PTY.
+
+Optimized arm64 build verified; the built bundle reports version 1.15 (build 16).

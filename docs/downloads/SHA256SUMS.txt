@@ -1,1 +1,1 @@
-00dcd3f508654589e4794aa0d275c270632e771beb4461700bbe5acbedd8640e  BrewBar-1.14.zip
+37663de82eed4594fc8717fb3e7dbde9452ac4422ec2aa5f003befaece6af3cc  BrewBar-1.15.zip
