@@ -1,1 +1,1 @@
-b368d593518babe1157b0cdc2fd0b44ae64e2b10139b50c1db3179ae06bed8a5  BrewBar-1.18.zip
+1cd0632df53727cabb0bcfedd7362da36e7b922a0efd33a128cec35add477844  BrewBar-1.18.zip

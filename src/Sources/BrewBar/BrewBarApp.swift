@@ -123,6 +123,7 @@ struct Dashboard: View {
                     Label("Close", systemImage: "xmark.circle")
                 }
                 .buttonStyle(.bordered).controlSize(.small)
+                .keyboardShortcut("w")
                 .help("Close this panel; BrewBar stays in the menu bar")
                 .accessibilityLabel("Close panel")
                 Button(role: .destructive) {
