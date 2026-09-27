@@ -81,6 +81,28 @@ import Darwin
         // brew search plain-text token extraction skips headers/warnings/blank lines.
         let tokens = SearchResult.searchTokens("==> Formulae\nwget\nwget2\n\nWarning: nothing\nnode\n")
         precondition(tokens == ["wget", "wget2", "node"], "Unexpected search tokens: \(tokens)")
+
+        // Multi-word Search & Install fix: brew matches lowercase tokens (no spaces/capitals), so a
+        // human query like "Tinycast Beta" must (1) search brew on the single most distinctive word,
+        // and (2) filter enriched results by the full query against token+name.
+        // (1) distinctiveTerm picks the longest brew-safe word, lowercased.
+        precondition(SearchResult.distinctiveTerm("tinycast Beta") == "tinycast", "distinctiveTerm should pick the longest word")
+        precondition(SearchResult.distinctiveTerm("the chrome") == "chrome", "longest word wins over a shorter one")
+        precondition(SearchResult.distinctiveTerm("wget") == "wget", "single-word query passes through")
+        precondition(SearchResult.distinctiveTerm("  ") == nil, "blank query yields no term")
+        precondition(SearchResult.distinctiveTerm("Google Chrome") == "google", "equal-length words resolve to the first")
+        // (2) matches: every query word must appear in token+name (case-insensitive substring).
+        let tinycastBeta = SearchResult(token: "abue-ammar/tinycast/tinycast@beta", name: "Tinycast Beta", detail: "", version: "0.1", kind: "App", installed: false)
+        let tinycast     = SearchResult(token: "abue-ammar/tinycast/tinycast",      name: "Tinycast",      detail: "", version: "0.1", kind: "App", installed: false)
+        let tinymist     = SearchResult(token: "tinymist",                          name: "tinymist",      detail: "", version: "0.1", kind: "Formula", installed: false)
+        precondition(tinycastBeta.matches(query: "tinycast Beta"), "Tinycast Beta must survive the multi-word filter")
+        precondition(!tinycast.matches(query: "tinycast Beta"), "plain Tinycast lacks 'beta' → filtered out")
+        precondition(!tinymist.matches(query: "tinycast Beta"), "tinymist must not match a tinycast query")
+        precondition(tinycast.matches(query: "tinycast"), "single-word query keeps a token-substring match")
+        precondition(tinymist.matches(query: "tiny"), "substring match on name/token")
+        // The whole tinycast set filtered by the multi-word query yields exactly Tinycast Beta.
+        precondition([tinycastBeta, tinycast, tinymist].filter { $0.matches(query: "tinycast Beta") } == [tinycastBeta],
+                     "Multi-word filter should resolve to exactly the Beta package")
         print("PASS: search result parsing (kind, version, installed-state), install arguments, token extraction")
 
         // Download progress parser: brew's `==> Downloading <url>` starts a bar, the `#### NN.N%`

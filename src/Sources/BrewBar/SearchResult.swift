@@ -46,6 +46,42 @@ struct SearchResult: Identifiable, Equatable {
         return result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    /// The single term to hand to `brew search`. Homebrew matches a query against package **tokens**
+    /// (and descriptions), and tokens never contain spaces or capitals — so a human, multi-word query
+    /// like "Tinycast Beta" can never substring-match a real token (brew falls back to a fuzzy match
+    /// and returns unrelated packages). To stay reliable we search on the single most **distinctive**
+    /// word — the longest alphanumeric word — then filter the enriched results client-side against the
+    /// full query (see `matches(query:)`). A single-word query passes through unchanged.
+    ///
+    /// Words are split on whitespace; the longest word wins (ties → the earliest), lowercased. Any
+    /// non-token characters within a word (e.g. stray punctuation) are dropped so only a brew-safe
+    /// term is produced. Returns `nil` if nothing usable remains.
+    static func distinctiveTerm(_ query: String) -> String? {
+        let words = query
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { word -> String in
+                String(word.lowercased().unicodeScalars.filter {
+                    CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789@+._/-").contains($0)
+                })
+            }
+            .filter { !$0.isEmpty }
+        guard !words.isEmpty else { return nil }
+        // Longest word is the most distinctive; ties resolve to the first occurrence.
+        return words.reduce(words[0]) { best, next in next.count > best.count ? next : best }
+    }
+
+    /// Client-side multi-word filter: keep a result only when **every** word of the user's original
+    /// query appears (case-insensitively, as a substring) in either the package `token` or its display
+    /// `name`. This is what makes "Tinycast Beta" resolve to the `tinycast@beta` / "Tinycast Beta"
+    /// package after brew is searched on just "tinycast". A single-word query keeps every result whose
+    /// token or name contains that word — matching brew's own substring behaviour, so no regression.
+    func matches(query: String) -> Bool {
+        let haystack = (token + " " + name).lowercased()
+        let words = query.split(whereSeparator: { $0.isWhitespace }).map { $0.lowercased() }
+        guard !words.isEmpty else { return true }
+        return words.allSatisfy { haystack.contains($0) }
+    }
+
     /// Parse the plain-text `brew search <query>` output into candidate tokens. When output is not
     /// a TTY, brew prints one name per line with no section headers; we still skip any `==>` lines,
     /// blank lines, and obvious warnings so only real tokens remain.

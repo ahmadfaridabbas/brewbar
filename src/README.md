@@ -189,6 +189,14 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.18: Reliable multi-word Search & Install
+
+Searching **Search & Install** with more than one word (e.g. `tinycast Beta`) previously returned the wrong package or nothing at all. Homebrew's `brew search` matches a query against package **tokens** — which are always lowercase and never contain spaces (`tinycast@beta`, `google-chrome`) — so a human, multi-word query can't substring-match any real token; brew falls back to a fuzzy match and surfaces an unrelated result (a search for "Tinycast Beta" returned only `tinymist`). This release makes multi-word search reliable.
+
+Implementation: a two-stage strategy in the pure, testable `SearchResult` helpers. `distinctiveTerm(_:)` reduces the query to the single most distinctive (longest) brew-safe word — `tinycast Beta` → `tinycast` — and that single term is what's handed to `brew search`, which reliably returns every `tinycast*` candidate. Then `matches(query:)` filters the enriched results client-side, keeping only packages whose **token or display name** contains every word of the original query — so `tinycast Beta` resolves to exactly `tinycast@beta` ("Tinycast Beta"), and `tinymist` is dropped. Single-word queries pass through unchanged (no regression), and a defensive fallback shows all candidates if the client filter would otherwise empty a non-empty result set. Added parser unit tests for `distinctiveTerm` (longest-word selection, single-word passthrough, blank input, tie resolves to first) and `matches` (multi-word survival/exclusion, single-word substring), including the full tinycast set resolving to exactly the Beta package.
+
+Optimized arm64 build verified; the built bundle reports version 1.18 (build 20).
+
 ## Version 1.17: Real byte progress from Homebrew's download queue
 
 The download progress bar now shows Homebrew's own byte counter — e.g. `263.1 MB of 373.1 MB · 71%` — instead of a percent-plus-estimated size. v1.16 pinned `HOMEBREW_DOWNLOAD_CONCURRENCY=1` to get brew's single-line `#### NN.N%` bar (percentage only), and derived bytes from a `HEAD` request. This release enables brew's default parallel download queue, which prints a live status line with exact bytes: `⠋ Cask <name> (<ver>) ####  Downloading 263.1MB/373.1MB`.

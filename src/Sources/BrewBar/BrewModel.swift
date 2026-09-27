@@ -236,8 +236,12 @@ struct BrewAction: Identifiable {
             return
         }
         searching = true; searchError = nil; searchResults = []; searchPerformed = true
+        // Homebrew matches tokens (never spaces/capitals), so a multi-word human query would fall
+        // through to a fuzzy match and return unrelated packages. Search on the single most
+        // distinctive word, then filter the enriched results by the full query (see enrich).
+        let searchTerm = SearchResult.distinctiveTerm(query) ?? query
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("BrewBar-search-\(UUID().uuidString).txt")
-        execute(arguments: ["search", query], standardOutputFile: file) { [weak self] code, cancelled in
+        execute(arguments: ["search", searchTerm], standardOutputFile: file) { [weak self] code, cancelled in
             guard let self = self else { return }
             defer { try? FileManager.default.removeItem(at: file) }
             guard code == 0 && !cancelled else {
@@ -268,7 +272,14 @@ struct BrewAction: Identifiable {
                 return
             }
             do {
-                self.searchResults = try SearchResult.parse(Data(contentsOf: file))
+                let all = try SearchResult.parse(Data(contentsOf: file))
+                // Filter by the full original query so multi-word searches ("Tinycast Beta") keep only
+                // packages whose token or name contains every word. Single-word queries keep matches
+                // whose token/name contains the word — mirroring brew's own substring behaviour.
+                let filtered = all.filter { $0.matches(query: query) }
+                // Never show an empty list when brew did return candidates: if the client filter is
+                // too strict (e.g. the display name differs from the token), fall back to all results.
+                self.searchResults = filtered.isEmpty ? all : filtered
                 if self.searchResults.isEmpty { self.searchError = "No installable formula or cask found for “\(query)”." }
                 self.append("Found \(self.searchResults.count) installable packages for “\(query)”.\n")
             } catch {
