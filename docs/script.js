@@ -38,3 +38,14 @@ for (const link of document.querySelectorAll('.shot')) {
 }
 document.querySelector('#close-dialog').addEventListener('click', () => dialog.close());
 dialog.addEventListener('click', event => { if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close(); } });
+
+// GA4: track Download button clicks (safe no-op if gtag is unavailable/blocked).
+for (const link of document.querySelectorAll('[data-track="download"]')) {
+  link.addEventListener('click', () => {
+    if (typeof window.gtag !== 'function') return;
+    window.gtag('event', 'download', {
+      location: link.dataset.location || 'unknown',
+      file_name: (link.getAttribute('href') || '').split('/').pop()
+    });
+  });
+}
