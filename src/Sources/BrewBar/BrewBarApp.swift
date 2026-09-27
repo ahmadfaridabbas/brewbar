@@ -109,8 +109,14 @@ struct Dashboard: View {
                     Link("Homebrew Documentation", destination: URL(string: "https://docs.brew.sh/Manpage")!)
                     Divider()
                     Button("Quit BrewBar") { NSApp.terminate(nil) }.keyboardShortcut("q")
-                } label: { Image(systemName: "ellipsis.circle").font(.title3) }
-                .menuStyle(.borderlessButton).frame(width: 28).help("BrewBar options")
+                } label: {
+                    Label("Options", systemImage: "ellipsis.circle")
+                }
+                .menuStyle(.button)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .fixedSize()
+                .help("BrewBar options")
                 Button {
                     dismiss()
                 } label: {

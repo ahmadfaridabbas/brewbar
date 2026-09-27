@@ -180,8 +180,12 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     symbol("xmark.circle", NSRect(x: closeR.minX + 8, y: closeR.midY - 6, width: 12, height: 12), color: t.muted)
     text(closeLabel, NSPoint(x: closeR.minX + 24, y: closeR.midY - 7), size: 11, color: t.ink, weight: .medium)
     cx = closeR.minX - 10
-    // Options ellipsis
-    symbol("ellipsis.circle", NSRect(x: cx - 20, y: top - 29, width: 20, height: 20), color: t.muted)
+    // Options button (bordered, matches Close/Quit — ellipsis + chevron)
+    let optsW: CGFloat = 44
+    let optsR = NSRect(x: cx - optsW, y: top - 30, width: optsW, height: 22)
+    fill(optsR, t.card, radius: 6); strokeRect(optsR, t.line, radius: 6)
+    symbol("ellipsis", NSRect(x: optsR.minX + 8, y: optsR.midY - 6, width: 14, height: 12), color: t.ink)
+    symbol("chevron.down", NSRect(x: optsR.maxX - 16, y: optsR.midY - 5, width: 9, height: 10), color: t.muted)
     top -= 74
 
     // Appearance row — a menu-style popup showing the current mode (5 options: System, Light,
