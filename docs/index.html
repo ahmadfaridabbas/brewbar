@@ -3,24 +3,108 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="BrewBar: a native SwiftUI menu-bar app that runs Homebrew maintenance, browses installed packages, and manages updates from your Mac's menu bar.">
+  <title>BrewBar — Homebrew GUI &amp; Menu-Bar Manager for Mac</title>
+  <meta name="description" content="BrewBar is a free Homebrew GUI for Mac: a native SwiftUI menu-bar app to update, upgrade, and clean up Homebrew, browse installed packages, and search &amp; install new ones — with a live console and no Terminal.">
+  <meta name="keywords" content="Homebrew GUI, Homebrew GUI Mac, Homebrew menu bar app, Homebrew manager, manage Homebrew updates, brew upgrade GUI, Homebrew without Terminal, brew cleanup app, macOS package manager GUI, Homebrew app">
+  <meta name="author" content="Ahmad Farid Abbas">
+  <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="theme-color" content="#111213">
-  <title>BrewBar — A little care for your Homebrew.</title>
+  <link rel="canonical" href="https://ahmadfaridabbas.github.io/brewbar/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="BrewBar">
+  <meta property="og:title" content="BrewBar — Homebrew GUI &amp; Menu-Bar Manager for Mac">
+  <meta property="og:description" content="A native SwiftUI menu-bar app to run Homebrew maintenance, browse installed packages, and manage updates on your Mac — no Terminal required.">
+  <meta property="og:url" content="https://ahmadfaridabbas.github.io/brewbar/">
+  <meta property="og:image" content="https://ahmadfaridabbas.github.io/brewbar/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="BrewBar, a Homebrew menu-bar app for Mac, shown in dark mode">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="BrewBar — Homebrew GUI &amp; Menu-Bar Manager for Mac">
+  <meta name="twitter:description" content="Update, upgrade, and clean up Homebrew from the menu bar. Browse installed packages and manage updates — no Terminal required.">
+  <meta name="twitter:image" content="https://ahmadfaridabbas.github.io/brewbar/assets/og-image.png">
+
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
   <script src="script.js" defer></script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "BrewBar",
+    "operatingSystem": "macOS 13.0 or later",
+    "applicationCategory": "DeveloperApplication",
+    "applicationSubCategory": "Package Manager GUI",
+    "description": "A native SwiftUI menu-bar app for Homebrew on macOS. Run maintenance, browse installed packages, search & install formulae and casks, and manage updates from the menu bar with a live command console — no Terminal required.",
+    "url": "https://ahmadfaridabbas.github.io/brewbar/",
+    "downloadUrl": "https://github.com/ahmadfaridabbas/brewbar/releases/latest",
+    "softwareVersion": "1.18",
+    "image": "https://ahmadfaridabbas.github.io/brewbar/assets/og-image.png",
+    "screenshot": "https://ahmadfaridabbas.github.io/brewbar/assets/hero.png",
+    "license": "https://github.com/ahmadfaridabbas/brewbar/blob/main/LICENSE",
+    "processorRequirements": "Apple Silicon",
+    "author": {
+      "@type": "Person",
+      "name": "Ahmad Farid Abbas"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    }
+  }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Is there a GUI for Homebrew on Mac?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. BrewBar is a free native menu-bar GUI for Homebrew on macOS. It lets you run brew update, upgrade, cleanup, autoremove, and doctor, browse installed formulae and casks, search and install new packages, and manage updates — all without opening the Terminal."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I update and upgrade Homebrew without the Terminal?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. BrewBar runs real brew commands from a menu-bar panel and streams their live output in a built-in console, so you can update, upgrade, and clean up Homebrew without typing commands in the Terminal."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What are the requirements for BrewBar?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "BrewBar requires macOS 13 Ventura or later on Apple Silicon, and an existing Homebrew installation at /opt/homebrew."
+        }
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="nav wrap">
   <a class="brand" href="#" aria-label="BrewBar home"><span class="brand-mark" aria-hidden="true">b.</span> BREWBAR</a>
-  <nav aria-label="Main navigation"><a href="#views">The panel</a><a href="#gallery">The looks</a><a href="#install">Install <span aria-hidden="true">↗</span></a></nav>
+  <nav aria-label="Main navigation"><a href="#views">The panel</a><a href="#gallery">The looks</a><a href="#faq">FAQ</a><a href="#install">Install <span aria-hidden="true">↗</span></a></nav>
 </header>
 <main id="main">
   <section class="hero wrap" aria-labelledby="hero-title">
-    <div class="hero-copy"><p class="eyebrow"><span class="square" aria-hidden="true"></span> A HOMEBREW MENU-BAR APP FOR MAC</p><h1 id="hero-title">A little care<br>for your <em>Homebrew.</em></h1><p class="intro">Update, upgrade, and clean up Homebrew from the menu bar. Browse installed packages and manage updates — with live output and no terminal.</p><a class="button" href="downloads/BrewBar-1.18.zip" download>Download for macOS <span aria-hidden="true">↓</span></a><p class="requirements">v1.18 &nbsp; / &nbsp; macOS 13+ &nbsp; / &nbsp; Apple Silicon</p></div>
+    <div class="hero-copy"><p class="eyebrow"><span class="square" aria-hidden="true"></span> A HOMEBREW MENU-BAR APP FOR MAC</p><h1 id="hero-title">A little care<br>for your <em>Homebrew.</em></h1><p class="intro">BrewBar is a native <strong>Homebrew GUI for Mac</strong> that lives in your menu bar. Update, upgrade, and clean up Homebrew, browse installed packages, and search &amp; install new ones — with live output and no Terminal.</p><a class="button" href="downloads/BrewBar-1.18.zip" download>Download for macOS <span aria-hidden="true">↓</span></a><p class="requirements">v1.18 &nbsp; / &nbsp; macOS 13+ &nbsp; / &nbsp; Apple Silicon</p></div>
     <figure class="hero-figure"><img src="assets/hero.png" width="560" height="680" alt="BrewBar dashboard in dark mode showing the maintenance actions grid and command console"><figcaption><span>01 / MAINTENANCE</span><span>Dark appearance</span></figcaption></figure>
   </section>
   <div class="feature-strip wrap"><span>Native SwiftUI menu-bar app</span><span>Search &amp; install packages</span><span>System · Light · Dark · Papery</span><span>No Terminal required</span></div>
@@ -58,6 +142,8 @@
   </div></section>
 
   <section class="section wrap details" aria-labelledby="details-title"><div><p class="eyebrow">03 / THE DETAILS</p><h2 id="details-title">Built to<br>behave.</h2></div><dl><div><dt>Maintenance</dt><dd>Update, Outdated, Upgrade, Cleanup, Autoremove, and Doctor — each a real <code>brew</code> command run with fixed, validated arguments.</dd></div><div><dt>Inventory &amp; install</dt><dd>Browse installed formulae and casks with search, then uninstall with a confirmation. Switch to <strong>Search &amp; Install</strong> to search all of Homebrew — each result shows its description, version, and whether it's already installed — and install with a confirmation. Homebrew's dependency checks stay active; the installed list refreshes automatically.</dd></div><div><dt>Updates</dt><dd>See installed → current versions from <code>brew outdated</code>, upgrade individually or all at once. Pinned packages are labeled.</dd></div><div><dt>Live console</dt><dd>Merged stdout/stderr in arrival order, timestamps, duration, and the real exit code. Stop escalates SIGINT → SIGTERM → SIGKILL.</dd></div><div><dt>Appearance</dt><dd>System, Light, Dark, or the warm Papery Light and Papery Dark themes — saved across launches, with matching light/dark artwork. A visible version line and Close / Quit controls.</dd></div><div><dt>Considerate</dt><dd>One command at a time. Closing the panel keeps a job running. Quit is blocked while busy. No Dock icon; a menu-bar template glyph.</dd></div></dl></section>
+
+  <section id="faq" class="section wrap details" aria-labelledby="faq-title"><div><p class="eyebrow">05 / FAQ</p><h2 id="faq-title">Questions,<br>answered.</h2></div><dl><div><dt>Is there a GUI for Homebrew on Mac?</dt><dd>Yes — BrewBar is a free native <strong>Homebrew GUI</strong> that lives in your Mac's menu bar. It runs <code>brew update</code>, <code>upgrade</code>, <code>cleanup</code>, <code>autoremove</code>, and <code>doctor</code>, browses installed formulae and casks, and can search and install new packages, all without the Terminal.</dd></div><div><dt>Can I update and upgrade Homebrew without the Terminal?</dt><dd>Yes. BrewBar runs real <code>brew</code> commands from a menu-bar panel and streams their live output in a built-in console, so you can update, upgrade, and clean up Homebrew without typing a single command.</dd></div><div><dt>Does BrewBar manage Homebrew updates?</dt><dd>It does. The Updates tab reads <code>brew outdated</code> and shows installed → current versions, so you can upgrade packages one at a time or all at once. Pinned packages are labeled.</dd></div><div><dt>What are the requirements?</dt><dd>macOS 13 Ventura or later on Apple Silicon, plus an existing Homebrew install at <code>/opt/homebrew</code>. BrewBar is free and open source under the MIT License.</dd></div></dl></section>
 
   <section id="install" class="install-section"><div class="wrap install-layout"><div><p class="eyebrow">04 / ON YOUR MAC</p><h2>Tend your<br>brew.</h2><a class="button" href="downloads/BrewBar-1.18.zip" download>Download BrewBar <span aria-hidden="true">↓</span></a><p class="requirements">macOS 13 Ventura or later · Apple Silicon</p></div><div><ol class="steps"><li><strong>Download &amp; unzip</strong><p>Open the ZIP to find <code>BrewBar.app</code>.</p></li><li><strong>Move &amp; open</strong><p>Drag it to Applications, then right-click → Open the first time.</p></li><li><strong>Find the mug</strong><p>Click the Terminal Mug glyph in the menu bar to open the panel.</p></li></ol><details><summary>Compatibility &amp; installation notes</summary><p>This build is ad-hoc signed and is not Apple-notarized. macOS may ask you to approve it in Privacy &amp; Security, or you can build locally from <code>src/</code> with <code>./build.sh</code>.</p><p>BrewBar needs an existing Homebrew install at <code>/opt/homebrew</code>. It reads your login environment to locate <code>brew</code> and shows the resolved path in the footer.</p><p>Optimized arm64 build and runner tests passed. Interactive UI and VoiceOver checks are recommended manually; the panel is a streaming console, not a full terminal.</p></details></div></div></section>
 </main>

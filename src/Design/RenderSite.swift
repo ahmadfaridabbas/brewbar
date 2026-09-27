@@ -424,6 +424,59 @@ func save(_ bmp: NSBitmapImageRep, _ path: String) {
     print("wrote \(path)")
 }
 
+// MARK: - Social preview card (Open Graph / Twitter, 1200x630)
+
+func renderOgCard(theme t: Theme) -> NSBitmapImageRep {
+    let width: CGFloat = 1200, height: CGFloat = 630
+    let scale: CGFloat = 2
+    let bmp = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width*scale), pixelsHigh: Int(height*scale),
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    bmp.size = NSSize(width: width, height: height)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bmp)
+
+    // Background (site dark bg) + subtle accent bar top.
+    fill(NSRect(x: 0, y: 0, width: width, height: height), c(0x111213))
+    fill(NSRect(x: 0, y: height - 8, width: width, height: 8), t.accent)
+
+    let pad: CGFloat = 72
+    // Left column: icon, title, tagline, feature line.
+    drawAppIcon(NSRect(x: pad, y: height - pad - 132, width: 132, height: 132), t)
+
+    text("BrewBar", NSPoint(x: pad, y: height - pad - 232), size: 74, color: c(0xF4F4EE), weight: .semibold, rounded: true)
+    text("Homebrew GUI & menu-bar manager for Mac", NSPoint(x: pad, y: height - pad - 292), size: 30, color: t.accent, weight: .medium)
+
+    let lines = [
+        "Update, upgrade & clean up Homebrew from the menu bar",
+        "Browse, search & install formulae and casks — no Terminal",
+        "Live command console · System · Light · Dark · Papery",
+    ]
+    for (i, line) in lines.enumerated() {
+        let y = height - pad - 356 - CGFloat(i) * 42
+        symbol("checkmark.circle.fill", NSRect(x: pad, y: y, width: 22, height: 22), color: t.accent)
+        text(line, NSPoint(x: pad + 34, y: y - 2), size: 22, color: c(0xC2C5C3))
+    }
+
+    // Footer URL.
+    text("ahmadfaridabbas.github.io/brewbar", NSPoint(x: pad, y: 40), size: 20, color: c(0xA7AAA9), weight: .medium)
+
+    // Right column: a scaled dashboard peek, clipped, bleeding off the right edge.
+    let panelRep = renderDashboard(width: 560, height: 680, theme: t, tab: .maintenance, seg: 2)
+    let panelImg = NSImage(size: NSSize(width: 560, height: 680))
+    panelImg.addRepresentation(panelRep)
+    let destW: CGFloat = 430, destH: CGFloat = destW * (680.0/560.0) // keep aspect
+    let dest = NSRect(x: width - destW + 40, y: (height - destH)/2 + 30, width: destW, height: destH)
+    NSGraphicsContext.saveGraphicsState()
+    NSBezierPath(roundedRect: dest, xRadius: 14, yRadius: 14).addClip()
+    panelImg.draw(in: dest, from: .zero, operation: .sourceOver, fraction: 1)
+    NSGraphicsContext.restoreGraphicsState()
+    strokeRect(dest, c(0x383A3B), radius: 14)
+
+    NSGraphicsContext.restoreGraphicsState()
+    return bmp
+}
+
 // MARK: - Output
 
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "docs/assets"
@@ -454,3 +507,6 @@ save(renderDashboard(width: W, height: H, theme: paperyLight, tab: .search, seg:
 save(renderDashboard(width: W, height: H, theme: paperyLight, tab: .maintenance, seg: 3), "\(out)/papery-light.png")
 save(renderDashboard(width: W, height: H, theme: paperyDark, tab: .maintenance, seg: 4), "\(out)/papery-dark.png")
 save(renderDashboard(width: W, height: H, theme: paperyLight, tab: .updates, seg: 3), "\(out)/papery-updates.png")
+
+// Social preview card for Open Graph / Twitter (1200x630)
+save(renderOgCard(theme: dark), "\(out)/og-image.png")

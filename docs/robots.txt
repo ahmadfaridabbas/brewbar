@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ahmadfaridabbas.github.io/brewbar/sitemap.xml
