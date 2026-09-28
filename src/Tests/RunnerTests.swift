@@ -166,6 +166,39 @@ import Darwin
         precondition(DownloadProgressParser.bytes(value: "263.1", unit: "MB") == Int64((263.1 * 1024 * 1024).rounded()))
         precondition(DownloadProgressParser.bytes(value: "2", unit: "GB") == Int64(2) * 1024 * 1024 * 1024)
         print("PASS: download progress parsing (start/advance/finish), file-name extraction, byte summary")
+
+        // RecoveryHint: a resumable-download dead-end (curl-56 / "Cannot resume") is detected and the
+        // affected package token + kind are extracted from brew's "Download failed on Cask 'x'" line.
+        let curl56Output = """
+        ==> Fetching downloads for: postman
+        ✗ Cask postman (12.30.0)                             Downloading
+        Error: Download failed on Cask 'postman' with message: Download failed: https://dl.pstmn.io/download/version/12.30.0/osx_arm64
+        curl: (56) HTTP server doesn't seem to support byte ranges. Cannot resume.
+        Error: postman: Download failed for postman.
+        """
+        guard let hint = RecoveryHintDetector.detect(in: curl56Output) else {
+            preconditionFailure("curl-56 resume failure should be detected")
+        }
+        precondition(hint.token == "postman", "Bad token: \(String(describing: hint.token))")
+        precondition(hint.isCask == true, "postman is a cask")
+        precondition(hint.message.contains("postman") && hint.message.contains("resuming"),
+                     "Message should name the package and mention resuming: \(hint.message)")
+        // A formula variant is recognised and flagged as not-a-cask.
+        let formulaOutput = "Error: Download failed on Formula 'wget' with message: …\ncurl: (56) ... Cannot resume."
+        let formulaHint = RecoveryHintDetector.detect(in: formulaOutput)
+        precondition(formulaHint?.token == "wget" && formulaHint?.isCask == false, "Formula token/kind wrong")
+        // The explicit "byte ranges" phrasing is enough even without the literal "curl: (56)".
+        precondition(RecoveryHintDetector.detect(in: "Error: HTTP server doesn't seem to support byte ranges.") != nil)
+        // A hint with no "Download failed on …" line still fires, just without a token.
+        let noToken = RecoveryHintDetector.detect(in: "curl: (56) The requested URL returned error. Cannot resume.")
+        precondition(noToken != nil && noToken?.token == nil, "Tokenless resume failure should still offer recovery")
+        // Non-resume failures must NOT be offered a cache-clear.
+        precondition(RecoveryHintDetector.detect(in: "curl: (56) Recv failure: Connection reset by peer") == nil,
+                     "curl-56 without a resume phrase is not recoverable this way")
+        precondition(RecoveryHintDetector.detect(in: "Error: Cask 'foo' is not installed.") == nil)
+        precondition(RecoveryHintDetector.detect(in: "") == nil)
+        print("PASS: recovery hint detection (curl-56 resume, formula/cask token, false-positive guards)")
+
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }
         let separated = CommandRunner()

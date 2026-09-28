@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.18"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.19"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -225,6 +225,27 @@ struct Dashboard: View {
                     .background(theme.accent.opacity(0.10))
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("\(model.promptText). Press Yes to proceed or No to abort.")
+                    Divider()
+                }
+                if let recovery = model.recovery, !model.busy {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(theme.warning)
+                        Text(recovery.message)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.text).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button { model.dismissRecovery() } label: { Text("Dismiss") }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .help("Hide this suggestion")
+                        Button { model.retryAfterCacheClear() } label: { Label("Clear Cache & Retry", systemImage: "arrow.clockwise") }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                            .disabled(!model.ready)
+                            .help("Clear the stale cached download, then run the command again")
+                    }
+                    .font(.system(size: 11)).padding(10)
+                    .background(theme.warning.opacity(0.12))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(recovery.message) Clear Cache and Retry, or Dismiss.")
                     Divider()
                 }
                 HStack(spacing: 12) {

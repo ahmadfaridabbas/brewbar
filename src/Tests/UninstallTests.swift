@@ -137,6 +137,53 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         pump { !model.busy }
         precondition(model.exitCode == 1 && !model.awaitingInput, "Answering no should abort (exit 1)")
         print("PASS: interactive [y/n] prompt arms once, answers via PTY, and does not re-arm")
+
+        // Recovery flow: a fake brew that fails a `upgrade --cask postman` with the curl-56 resume
+        // signature. The model must (1) set `recovery` with the extracted token on the failure, and
+        // (2) on retryAfterCacheClear run `cleanup postman` first, then re-run the original upgrade.
+        // A marker file lets the fake brew succeed on the *second* upgrade so the retry ends clean.
+        let marker = folder.appendingPathComponent("retry-marker")
+        let resumeBrew = folder.appendingPathComponent("resume-brew")
+        try """
+        #!/bin/sh
+        printf '%s\\n' "$@"
+        if [ "$1" = "cleanup" ]; then exit 0; fi
+        if [ "$1" = "upgrade" ]; then
+          if [ -f "\(marker.path)" ]; then
+            printf '==> Upgrading postman\\n'; exit 0
+          fi
+          touch "\(marker.path)"
+          printf "Error: Download failed on Cask 'postman' with message: Download failed\\n" >&2
+          printf "curl: (56) HTTP server doesn't seem to support byte ranges. Cannot resume.\\n" >&2
+          exit 1
+        fi
+        exit 0
+        """.write(to: resumeBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: resumeBrew.path)
+        model.brewPath = resumeBrew.path
+        model.recovery = nil
+        // Run a maintenance command (`brew upgrade`) that fails with the curl-56 resume signature.
+        model.run(BrewAction(command: "upgrade", title: "Upgrade", detail: "", icon: ""))
+        pump { !model.busy }
+        precondition(model.failed && model.exitCode == 1, "First upgrade should fail")
+        guard let rec = model.recovery else { preconditionFailure("A resume failure must offer recovery") }
+        precondition(rec.token == "postman" && rec.isCask == true, "Recovery token/kind wrong: \(String(describing: rec.token))")
+        // Retry: clears the cache (cleanup postman), then re-runs the original upgrade, which now
+        // succeeds (marker present). Recovery is cleared once the retry starts.
+        model.retryAfterCacheClear()
+        precondition(model.recovery == nil, "Retry must clear the recovery offer")
+        pump { !model.busy }
+        precondition(model.output.contains("cleanup\npostman"), "Retry should run `brew cleanup postman` first")
+        precondition(model.exitCode == 0, "Re-run after cache clear should succeed")
+        precondition(model.recovery == nil, "A successful retry leaves no recovery offer")
+        // Guard: retryAfterCacheClear is a no-op when there is no recovery offer.
+        model.retryAfterCacheClear()
+        precondition(!model.busy, "No recovery → retry does nothing")
+        // dismissRecovery clears the offer without running anything.
+        model.recovery = RecoveryHint(token: "x", isCask: false)
+        model.dismissRecovery()
+        precondition(model.recovery == nil && !model.busy, "Dismiss clears the offer without acting")
+        print("PASS: resumable-download recovery detects token, clears cache, re-runs, and clears the offer")
     }
     static func pump(_ done: () -> Bool) {
         let end = Date().addingTimeInterval(12)

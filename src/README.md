@@ -189,6 +189,14 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.19: Recover from Homebrew's "cannot resume" download dead-end
+
+Some cask upgrades (e.g. `brew upgrade --cask postman`) can fail with `curl: (56) HTTP server doesn't seem to support byte ranges. Cannot resume.` — a stale partial download sits in Homebrew's cache and the CDN refuses a Range request, so brew keeps trying to resume and hits a dead-end. Previously the only fix was to drop to a Terminal and run `brew cleanup <package>` by hand. BrewBar now detects this failure and offers a one-click recovery.
+
+Implementation: a new pure, AppKit-free `RecoveryHint` model + `RecoveryHintDetector` scans a failed command's output for the signature — a `curl: (56)` line together with a resume phrase, or an explicit "cannot resume" / "byte ranges" phrase — and extracts the offending package token and kind (cask/formula) from brew's `Download failed on Cask 'postman'` / `Formula 'wget'` line. The detector requires the resume signature specifically, so unrelated curl-56 errors (connection reset, etc.) are **not** offered a cache-clear (a false-positive guard). On a real (non-cancelled) failure whose output matches, `BrewModel` publishes a `recovery` hint; `BrewBarApp` shows a warning-tinted recovery bar in the console (mirroring the `[y/n]` prompt bar) with **Clear Cache & Retry** and **Dismiss**. Retry runs `brew cleanup <token>` (fixed args, no shell interpolation; falls back to a global `brew cleanup` when brew didn't name a package), then re-runs the exact failed command with output preserved so the whole recovery story stays in one console log, and re-checks updates on success. The offer clears on a new command, Stop, or Clear. Added recovery-hint detection tests (curl-56 resume, formula/cask token extraction, byte-ranges-only phrasing, tokenless hint, false-positive guards) and a full flow test (fake resume-failing `brew upgrade` → recovery set → cache-clear + re-run to exit 0 → recovery cleared).
+
+Optimized arm64 build verified; the built bundle reports version 1.19 (build 21).
+
 ## Version 1.18: Reliable multi-word Search & Install
 
 Searching **Search & Install** with more than one word (e.g. `tinycast Beta`) previously returned the wrong package or nothing at all. Homebrew's `brew search` matches a query against package **tokens** — which are always lowercase and never contain spaces (`tinycast@beta`, `google-chrome`) — so a human, multi-word query can't substring-match any real token; brew falls back to a fuzzy match and surfaces an unrelated result (a search for "Tinycast Beta" returned only `tinymist`). This release makes multi-word search reliable.

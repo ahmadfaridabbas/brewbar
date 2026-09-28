@@ -84,6 +84,13 @@ struct BrewAction: Identifiable {
     /// downloaded; set from parsing brew's `==> Downloading …` / `#### NN.N%` output and cleared
     /// when the download finishes (or the command moves on / ends).
     @Published var download: DownloadProgress?
+    /// A recoverable failure BrewBar can offer to fix with one click (currently: a resumable-download
+    /// dead-end where a stale partial file in brew's cache can't be resumed). Set when a command
+    /// fails with the matching signature; cleared when a new command runs, on Stop, or on Clear.
+    @Published var recovery: RecoveryHint?
+    /// The arguments of the most recent user-run maintenance command, kept so the recovery flow can
+    /// re-run the exact same command after clearing the stale download cache.
+    private var lastArguments: [String] = []
     /// Identifies the in-flight size lookup so a stale HEAD response can't populate a later download.
     private var downloadSizeToken = UUID()
     private var environment = ProcessInfo.processInfo.environment
@@ -144,7 +151,8 @@ struct BrewAction: Identifiable {
         guard ready, !busy, let path = brewPath else { return }
         uninstallCandidate = nil
         busy = true; stopping = false; failed = false; exitCode = nil
-        awaitingInput = false; promptText = ""; clearDownload()
+        awaitingInput = false; promptText = ""; clearDownload(); recovery = nil
+        lastArguments = arguments
         started = Date(); finished = nil; command = "brew " + arguments.joined(separator: " "); status = "Running"
         pending.removeAll(); truncated = false
         let heading = "[\(Date().formatted(date: .omitted, time: .standard))] $ \(command)\n"
@@ -167,6 +175,9 @@ struct BrewAction: Identifiable {
             self.awaitingInput = false; self.promptText = ""; self.clearDownload()
             self.failed = code != 0 && !cancelled
             self.status = cancelled ? "Cancelled" : (code == 0 ? "Succeeded" : "Needs attention")
+            // Offer a one-click fix when the failure is a resumable-download dead-end (curl-56 /
+            // "Cannot resume"). Only for a real (non-cancelled) failure of a retryable command.
+            if self.failed, let hint = RecoveryHintDetector.detect(in: self.output) { self.recovery = hint }
             while self.output.last == "\n" || self.output.last == "\r" { self.output.removeLast() }
             self.append("\n[\(Date().formatted(date: .omitted, time: .standard))] \(self.status) · Exit \(code)\n")
             if cancelled { self.append("Completed changes are not rolled back. Run Doctor to check Homebrew.\n") }
@@ -435,6 +446,37 @@ struct BrewAction: Identifiable {
         runner?.send(proceed ? "y" : "n")
     }
 
+    /// Recover from a resumable-download failure: clear the stale cached download, then re-run the
+    /// exact command that failed. `brew cleanup <token>` deletes the partial file curl couldn't
+    /// resume (and any other stale downloads for that package); the follow-up fetch starts fresh.
+    /// When brew didn't name a package we fall back to a global `brew cleanup`. Both use fixed
+    /// arguments (no shell interpolation), matching every other command in the app.
+    func retryAfterCacheClear() {
+        guard ready, !busy, let hint = recovery else { return }
+        let command = lastArguments
+        guard !command.isEmpty else { return }
+        var cleanupArguments = ["cleanup"]
+        if let token = hint.token,
+           token.range(of: "^[A-Za-z0-9][A-Za-z0-9@+._/-]*$", options: .regularExpression) != nil {
+            cleanupArguments.append(token)
+        }
+        recovery = nil
+        // Stage one: clear the cache. Then, regardless of cleanup's exit, re-run the original command
+        // (preserving the console so the user sees the whole recovery story in one log).
+        execute(arguments: cleanupArguments) { [weak self] _, cancelled in
+            guard let self = self, !cancelled else { return }
+            self.execute(arguments: command, preserveOutput: true) { [weak self] code, cancelled in
+                guard let self = self else { return }
+                // Mirror the side effects the original command would have triggered.
+                self.inventoryStale = true; self.updatesStale = true
+                if code == 0 && !cancelled { self.checkUpdates(preserveOutput: true) }
+            }
+        }
+    }
+
+    /// Dismiss the recovery offer without acting (the user will handle it themselves).
+    func dismissRecovery() { recovery = nil }
+
     /// Parse the just-flushed `text` line-by-line for brew's download markers and update the
     /// progress bar. The bar carries only a percentage; the total size is resolved asynchronously
     /// from the download URL so the console can show "X MB of Y MB". Progress bar lines are rewritten
@@ -515,7 +557,7 @@ struct BrewAction: Identifiable {
             truncated = true
         }
     }
-    func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); status = "Stopping…"; runner?.cancel() }
-    func clear() { output = ""; pending.removeAll(); truncated = false; clearDownload() }
+    func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); recovery = nil; status = "Stopping…"; runner?.cancel() }
+    func clear() { output = ""; pending.removeAll(); truncated = false; clearDownload(); recovery = nil }
     func copy() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
 }
