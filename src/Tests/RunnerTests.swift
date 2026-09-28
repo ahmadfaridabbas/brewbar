@@ -225,6 +225,38 @@ import Darwin
         precondition(RecoveryHintDetector.detect(in: "Error: some other cask problem") == nil)
         print("PASS: stale-app-artifact detection (token, cask flag, force-retry action)")
 
+        // PackageInfo: parse `brew info --json=v2 <token>` for a formula (homepage, deps, version,
+        // size, caveats) and a cask (depends_on, no size), plus the homepage-validity guard.
+        let formulaInfoJSON = Data(#"""
+        {"formulae":[{"name":"wget","full_name":"wget","desc":"Internet file retriever","homepage":"https://www.gnu.org/software/wget/","versions":{"stable":"1.25.0"},"dependencies":["libidn2","openssl@3"],"installed":[{"version":"1.25.0","installed_size":4194304}],"caveats":"Some caveat text.\n"}],"casks":[]}
+        """#.utf8)
+        guard let wgetInfo = PackageInfo.parse(formulaInfoJSON) else { preconditionFailure("Formula info should parse") }
+        precondition(wgetInfo.kind == "Formula" && wgetInfo.name == "wget", "Bad formula identity")
+        precondition(wgetInfo.description == "Internet file retriever", "Bad desc: \(wgetInfo.description)")
+        precondition(wgetInfo.homepage == "https://www.gnu.org/software/wget/" && wgetInfo.homepageIsValid, "Homepage should be valid")
+        precondition(wgetInfo.version == "1.25.0", "Bad version: \(wgetInfo.version)")
+        precondition(wgetInfo.dependencies == ["libidn2", "openssl@3"], "Bad deps: \(wgetInfo.dependencies)")
+        precondition(wgetInfo.installSize == "4.0 MB", "Bad size: \(String(describing: wgetInfo.installSize))")
+        precondition(wgetInfo.caveats == "Some caveat text.", "Caveats should be trimmed: \(String(describing: wgetInfo.caveats))")
+
+        let caskInfoJSON = Data(#"""
+        {"formulae":[],"casks":[{"token":"iterm2","full_token":"iterm2","name":["iTerm2"],"desc":"Terminal emulator","homepage":"https://iterm2.com/","version":"3.5.0","depends_on":{"formula":["something"],"cask":["xquartz"]}}]}
+        """#.utf8)
+        guard let itermInfo = PackageInfo.parse(caskInfoJSON) else { preconditionFailure("Cask info should parse") }
+        precondition(itermInfo.kind == "App" && itermInfo.name == "iTerm2", "Bad cask identity")
+        precondition(itermInfo.version == "3.5.0" && itermInfo.installSize == nil, "Cask has version, no size")
+        precondition(itermInfo.dependencies == ["something", "xquartz"], "Bad cask deps: \(itermInfo.dependencies)")
+        precondition(itermInfo.caveats == nil, "No caveats expected")
+        // Preamble tolerance + guards.
+        let noisyInfo = Data(("==> Downloading Homebrew API data\n" + String(data: formulaInfoJSON, encoding: .utf8)!).utf8)
+        precondition(PackageInfo.parse(noisyInfo)?.name == "wget", "Preamble should not break info parsing")
+        precondition(PackageInfo.parse(Data(#"{"formulae":[],"casks":[]}"#.utf8)) == nil, "Empty payload → nil")
+        // Homepage validity guard: a non-http scheme or empty string is not openable.
+        let badHome = PackageInfo(token: "x", name: "x", kind: "Formula", description: "", homepage: "javascript:alert(1)", version: "1", dependencies: [], installSize: nil, caveats: nil)
+        precondition(!badHome.homepageIsValid, "Non-http homepage must be rejected")
+        precondition(PackageInfo.formatBytes(0) == "—" && PackageInfo.formatBytes(512) == "512 B" && PackageInfo.formatBytes(1536) == "1.5 KB", "Byte formatting")
+        print("PASS: package info parsing (formula deps/size/caveats, cask depends_on, homepage guard, byte format)")
+
 
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }

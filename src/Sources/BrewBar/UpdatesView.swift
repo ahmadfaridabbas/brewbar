@@ -38,6 +38,17 @@ struct UpdatesView: View {
                                 Text(package.kind + (package.pinned ? " · Pinned" : "")).font(.system(size: 10)).foregroundStyle(theme.secondaryText)
                             }
                             Spacer()
+                            Button {
+                                if model.infoTarget == package.id { model.dismissInfo() }
+                                else { model.fetchInfo(token: package.name, kind: package.kind, id: package.id) }
+                            } label: { Image(systemName: "info.circle") }
+                                .buttonStyle(.plain).controlSize(.small).foregroundStyle(theme.secondaryText)
+                                .disabled(model.busy || !model.ready).help("Show package details")
+                                .accessibilityLabel("Show details for \(package.name)")
+                                .popover(isPresented: Binding(get: { model.infoTarget == package.id },
+                                                              set: { if !$0 && model.infoTarget == package.id { model.dismissInfo() } })) {
+                                    PackageInfoPopover(model: model, fallbackName: package.name).environment(\.theme, theme)
+                                }
                             Button("Upgrade") { model.upgrade(package) }.controlSize(.small)
                                 .disabled(model.busy || !model.ready || package.pinned || !package.valid || model.updatesStale)
                                 .accessibilityLabel("Upgrade \(package.name) to \(package.currentVersion)")

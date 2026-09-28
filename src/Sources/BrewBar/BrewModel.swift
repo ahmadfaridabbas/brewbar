@@ -63,6 +63,19 @@ struct BrewAction: Identifiable {
     @Published var searchError: String?
     @Published var searchPerformed = false
     @Published var installCandidate: SearchResult?
+    // Per-package info popover (Feature 2). `infoTarget` is the id (kind:token) whose popover is
+    // open; `packageInfo` holds the fetched detail once ready; `infoLoading` gates a spinner;
+    // `infoError` shows a short message when the fetch fails.
+    @Published var infoTarget: String?
+    @Published var packageInfo: PackageInfo?
+    @Published var infoLoading = false
+    @Published var infoError: String?
+    // Menu-bar update badge (Feature 1). Count of outdated packages from the most recent check
+    // (manual or the silent background check). Drives the menu-bar label + glyph dot.
+    @Published var updateCount = 0
+    // Brewfile restore confirmation (Feature 4). Holds the chosen Brewfile URL awaiting the user's
+    // confirmation before `brew bundle install` runs (mirrors the install/uninstall confirm pattern).
+    @Published var brewfileRestoreCandidate: URL?
     @Published var follow = true
     @Published var output = ""
     @Published var status = "Preparing environment…"
@@ -337,6 +350,7 @@ struct BrewAction: Identifiable {
             do {
                 self.updates = try PackageUpdate.parse(Data(contentsOf: file))
                 self.updatesLoaded = true; self.updatesStale = false; self.updatesChecked = Date()
+                self.updateCount = self.updates.count
                 self.append("\(self.updates.count) available updates in current definitions.\n")
             } catch {
                 self.updatesError = "Could not read Homebrew update data. Retry the check."
@@ -571,6 +585,133 @@ struct BrewAction: Identifiable {
             truncated = true
         }
     }
+    /// Fetch rich detail for one package to show in its info popover (Feature 2). Uses a quiet JSON
+    /// capture to a temp file (like `refreshInstalled`), so the console isn't spammed. Gated by the
+    /// one-command `!busy` invariant. `id` is the row's `kind:token`; opening a popover sets
+    /// `infoTarget` immediately (so the UI can anchor) and this fills `packageInfo` when ready.
+    func fetchInfo(token: String, kind: String, id: String) {
+        guard ready, !busy else { return }
+        guard token.range(of: "^[A-Za-z0-9][A-Za-z0-9@+._/-]*$", options: .regularExpression) != nil else {
+            infoError = "Cannot look up this package."; return
+        }
+        infoTarget = id; packageInfo = nil; infoError = nil; infoLoading = true
+        let flag = kind == "App" ? "--cask" : "--formula"
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("BrewBar-pkginfo-\(UUID().uuidString).json")
+        execute(arguments: ["info", "--json=v2", flag, token], standardOutputFile: file, preserveOutput: true) { [weak self] code, cancelled in
+            defer { try? FileManager.default.removeItem(at: file) }
+            guard let self = self else { return }
+            self.infoLoading = false
+            // If the user closed the popover (or opened a different one) meanwhile, drop the result.
+            guard self.infoTarget == id else { return }
+            guard code == 0 && !cancelled else {
+                self.infoError = cancelled ? "Cancelled." : "Could not load details. See the console."
+                return
+            }
+            if let info = PackageInfo.parse(Data((try? Data(contentsOf: file)) ?? Data())) {
+                self.packageInfo = info
+            } else {
+                self.infoError = "No details available for this package."
+            }
+        }
+    }
+
+    /// Close the info popover and drop any loaded/loading detail.
+    func dismissInfo() { infoTarget = nil; packageInfo = nil; infoError = nil; infoLoading = false }
+
+    /// Silent background check for outdated packages (Feature 1). Runs `brew outdated --json=v2`
+    /// on its OWN `CommandRunner` — it does NOT go through `execute`, so it never writes to the
+    /// console, never toggles `busy`, and never disturbs a running/idle foreground command. Only
+    /// `updateCount` (and the badge) is updated. Skipped entirely while a foreground command is
+    /// busy or while brew isn't ready, so it can't collide with user actions.
+    private var backgroundChecker: CommandRunner?
+    private var updateCheckTimer: Timer?
+    func backgroundCheckUpdates() {
+        guard ready, !busy, brewPath != nil, backgroundChecker == nil else { return }
+        guard let path = brewPath else { return }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("BrewBar-bg-\(UUID().uuidString).json")
+        let checker = CommandRunner(); backgroundChecker = checker
+        checker.run(executable: path, arguments: ["outdated", "--json=v2"], environment: environment,
+                    standardOutputFile: file, usePTY: false) { _ in
+        } completion: { [weak self] code, cancelled in
+            defer { try? FileManager.default.removeItem(at: file) }
+            guard let self = self else { return }
+            self.backgroundChecker = nil
+            guard code == 0 && !cancelled else { return }
+            if let list = try? PackageUpdate.parse(Data(contentsOf: file)) {
+                self.updateCount = list.count
+                // If the Updates tab hasn't been loaded/hydrated yet, seed it so the count is
+                // consistent when the user opens it (without marking a manual check timestamp).
+                if !self.updatesLoaded {
+                    self.updates = list; self.updatesLoaded = true; self.updatesStale = true
+                }
+            }
+        }
+    }
+
+    /// Start the periodic background update check: once shortly after launch, then every 6 hours.
+    /// Idempotent — calling twice won't stack timers.
+    func startBackgroundUpdateChecks() {
+        guard updateCheckTimer == nil else { return }
+        // A short delay after launch lets environment resolution (`prepare`) finish first.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            Task { @MainActor in self?.backgroundCheckUpdates() }
+        }
+        let timer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.backgroundCheckUpdates() }
+        }
+        updateCheckTimer = timer
+    }
+
+    /// Export the current Homebrew setup to a Brewfile (Feature 4). Shows a save panel (default name
+    /// `Brewfile` in the home folder), then runs `brew bundle dump --file=<path> --force` — fixed
+    /// args, the only interpolated value being the user-picked path from the panel (not shell-parsed;
+    /// passed as a single argv element). Output stays in the console like any other command.
+    func exportBrewfile() {
+        guard ready, !busy else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export Brewfile"
+        panel.message = "Save a Brewfile snapshot of your installed formulae, casks, and taps."
+        panel.nameFieldStringValue = "Brewfile"
+        panel.canCreateDirectories = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        // `--force` overwrites an existing file at the chosen path (the user already confirmed the
+        // save panel's own replace prompt). `--describe` adds helpful comments to the Brewfile.
+        execute(arguments: ["bundle", "dump", "--force", "--describe", "--file=\(url.path)"]) { [weak self] code, cancelled in
+            guard let self = self else { return }
+            if code == 0 && !cancelled { self.append("Brewfile saved to \(url.path)\n") }
+        }
+    }
+
+    /// Pick a Brewfile to restore from (Feature 4). Shows an open panel; on selection, stashes the
+    /// URL in `brewfileRestoreCandidate` so the UI can show a confirmation before anything runs.
+    func chooseBrewfileToRestore() {
+        guard ready, !busy else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Restore from Brewfile"
+        panel.message = "Choose a Brewfile to install its formulae, casks, and taps."
+        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        brewfileRestoreCandidate = url
+    }
+
+    /// Confirm and run the restore: `brew bundle install --file=<path>`. This can install many
+    /// packages, so it's gated behind the explicit confirmation set up by `chooseBrewfileToRestore`.
+    func confirmRestoreBrewfile() {
+        guard ready, !busy, let url = brewfileRestoreCandidate else { return }
+        brewfileRestoreCandidate = nil
+        execute(arguments: ["bundle", "install", "--file=\(url.path)"]) { [weak self] code, cancelled in
+            guard let self = self else { return }
+            // A restore can install/upgrade many packages; everything is now stale.
+            self.inventoryStale = true; self.updatesStale = true
+            if code == 0 && !cancelled { self.append("Brewfile restore complete.\n") }
+        }
+    }
+
+    /// Cancel a pending restore without running anything.
+    func cancelRestoreBrewfile() { brewfileRestoreCandidate = nil }
+
     func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); recovery = nil; status = "Stopping…"; runner?.cancel() }
     func clear() { output = ""; pending.removeAll(); truncated = false; clearDownload(); recovery = nil }
     func copy() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }

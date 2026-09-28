@@ -64,7 +64,8 @@ struct InstalledView: View {
                     ForEach(model.filteredPackages) { package in
                         packageRow(icon: package.kind == "App" ? "app.dashed" : "shippingbox.fill",
                                    name: package.name, detail: package.detail,
-                                   meta: "\(package.kind) · \(package.version)") {
+                                   meta: "\(package.kind) · \(package.version)",
+                                   infoID: package.id, infoToken: package.token, infoKind: package.kind) {
                             Button("Uninstall", role: .destructive) { model.uninstallCandidate = package }
                                 .controlSize(.small).disabled(model.busy || !model.ready || !package.canUninstall)
                                 .accessibilityLabel("Uninstall \(package.name)")
@@ -120,7 +121,8 @@ struct InstalledView: View {
                     ForEach(model.searchResults) { result in
                         packageRow(icon: result.kind == "App" ? "app.dashed" : "shippingbox.fill",
                                    name: result.name, detail: result.detail,
-                                   meta: "\(result.kind) · \(result.version)") {
+                                   meta: "\(result.kind) · \(result.version)",
+                                   infoID: result.id, infoToken: result.token, infoKind: result.kind) {
                             if result.installed {
                                 Label("Installed", systemImage: "checkmark.circle.fill")
                                     .font(.system(size: 11)).foregroundStyle(theme.accent)
@@ -140,6 +142,7 @@ struct InstalledView: View {
     // MARK: - Shared row / card builders
 
     @ViewBuilder private func packageRow<Trailing: View>(icon: String, name: String, detail: String, meta: String,
+                                                         infoID: String, infoToken: String, infoKind: String,
                                                          @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon).font(.system(size: 19)).foregroundStyle(theme.accent).frame(width: 28)
@@ -149,6 +152,17 @@ struct InstalledView: View {
                 Text(meta).font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.secondaryText).lineLimit(1)
             }
             Spacer(minLength: 4)
+            Button {
+                if model.infoTarget == infoID { model.dismissInfo() }
+                else { model.fetchInfo(token: infoToken, kind: infoKind, id: infoID) }
+            } label: { Image(systemName: "info.circle") }
+                .buttonStyle(.plain).controlSize(.small).foregroundStyle(theme.secondaryText)
+                .disabled(model.busy || !model.ready).help("Show package details")
+                .accessibilityLabel("Show details for \(name)")
+                .popover(isPresented: Binding(get: { model.infoTarget == infoID },
+                                              set: { if !$0 && model.infoTarget == infoID { model.dismissInfo() } })) {
+                    PackageInfoPopover(model: model, fallbackName: name).environment(\.theme, theme)
+                }
             trailing()
         }.padding(10).background(theme.surface, in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(theme.surfaceBorder))

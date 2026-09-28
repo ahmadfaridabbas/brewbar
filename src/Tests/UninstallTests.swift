@@ -220,6 +220,80 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         precondition(model.exitCode == 0, "Re-run with --force should succeed")
         precondition(model.recovery == nil, "A successful force retry leaves no recovery offer")
         print("PASS: stale-app-artifact recovery detects token, force-retries, and clears the offer")
+
+        // Feature 4 — Brewfile restore: a fake brew that echoes its args and exits 0. A confirmed
+        // restore must run `brew bundle install --file=<path>`; cancel must run nothing.
+        let bundleBrew = folder.appendingPathComponent("bundle-brew")
+        try """
+        #!/bin/sh
+        printf '%s\\n' "$@"
+        exit 0
+        """.write(to: bundleBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: bundleBrew.path)
+        model.brewPath = bundleBrew.path
+        let brewfile = folder.appendingPathComponent("Brewfile")
+        try "brew \"wget\"\n".write(to: brewfile, atomically: true, encoding: .utf8)
+        // cancelRestoreBrewfile clears the candidate without running.
+        model.brewfileRestoreCandidate = brewfile
+        model.cancelRestoreBrewfile()
+        precondition(model.brewfileRestoreCandidate == nil && !model.busy, "Cancel restore runs nothing")
+        // confirmRestoreBrewfile runs bundle install with the chosen file.
+        model.brewfileRestoreCandidate = brewfile
+        model.confirmRestoreBrewfile()
+        precondition(model.brewfileRestoreCandidate == nil, "Confirm clears the candidate")
+        pump { !model.busy }
+        precondition(model.exitCode == 0, "Restore should succeed")
+        precondition(model.output.contains("bundle\ninstall\n--file=\(brewfile.path)"), "Restore must run bundle install with the file: \(model.output)")
+        precondition(model.inventoryStale && model.updatesStale, "Restore marks inventory + updates stale")
+        // Guard: confirm with no candidate does nothing.
+        model.confirmRestoreBrewfile()
+        precondition(!model.busy, "No candidate → confirm does nothing")
+        print("PASS: Brewfile restore runs bundle install with chosen file; cancel/no-candidate are no-ops")
+
+        // Feature 2 — fetchInfo: a fake brew that emits a formula info payload. The model must set
+        // infoTarget immediately, then populate packageInfo from the parsed JSON.
+        let infoBrew = folder.appendingPathComponent("info-brew")
+        try #"""
+        #!/bin/sh
+        # Args land on stderr echo is skipped; emit JSON to stdout (captured to the info file).
+        cat <<'JSON'
+        {"formulae":[{"name":"wget","full_name":"wget","desc":"Internet file retriever","homepage":"https://www.gnu.org/software/wget/","versions":{"stable":"1.25.0"},"dependencies":["openssl@3"],"installed":[{"version":"1.25.0","installed_size":2097152}]}],"casks":[]}
+        JSON
+        exit 0
+        """#.write(to: infoBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: infoBrew.path)
+        model.brewPath = infoBrew.path
+        model.fetchInfo(token: "wget", kind: "Formula", id: "Formula:wget")
+        precondition(model.infoTarget == "Formula:wget" && model.infoLoading, "fetchInfo arms target + loading immediately")
+        pump { !model.busy }
+        precondition(!model.infoLoading, "info loading clears when done")
+        precondition(model.packageInfo?.name == "wget", "packageInfo should be populated: \(String(describing: model.packageInfo))")
+        precondition(model.packageInfo?.installSize == "2.0 MB" && model.packageInfo?.dependencies == ["openssl@3"], "info fields parsed")
+        // dismissInfo clears everything.
+        model.dismissInfo()
+        precondition(model.infoTarget == nil && model.packageInfo == nil, "dismissInfo clears state")
+        // Guard: an invalid token is rejected without running.
+        model.fetchInfo(token: "bad;rm", kind: "Formula", id: "x")
+        precondition(model.infoError != nil && !model.busy, "Invalid token rejected")
+        print("PASS: fetchInfo arms target, populates packageInfo, dismiss + invalid-token guards")
+
+        // Feature 1 — updateCount from a check. A fake brew emitting an outdated payload with one
+        // cask updates the count.
+        let outdatedBrew = folder.appendingPathComponent("outdated-brew")
+        try #"""
+        #!/bin/sh
+        cat <<'JSON'
+        {"formulae":[{"name":"wget","installed_versions":["1.0"],"current_version":"2.0","pinned":false}],"casks":[]}
+        JSON
+        exit 0
+        """#.write(to: outdatedBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: outdatedBrew.path)
+        model.brewPath = outdatedBrew.path
+        model.updateCount = 0
+        model.checkUpdates()
+        pump { !model.busy }
+        precondition(model.updateCount == 1, "checkUpdates should set updateCount from results: \(model.updateCount)")
+        print("PASS: updateCount reflects the latest outdated check")
     }
     static func pump(_ done: () -> Bool) {
         let end = Date().addingTimeInterval(12)

@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.21"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.22"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -56,6 +56,40 @@ enum BrandImages {
         image.isTemplate = true
         return image
     }()
+
+    /// The menu-bar glyph, optionally badged with a small dot in the top-right when updates are
+    /// pending. When `count == 0` (and not running) we return the plain template image so the OS
+    /// tints it for light/dark menu bars as usual. When there's a badge we must draw in color (a
+    /// template image can't carry a colored dot), so the result is a non-template composite: the
+    /// base glyph is drawn as a filled template using the current control text color so it still
+    /// looks native, then an amber dot is stamped on top.
+    static func menuBarBadged(count: Int, running: Bool) -> NSImage {
+        guard count > 0, !running else { return menuBar }
+        let size = NSSize(width: 18, height: 18)
+        let composite = NSImage(size: size)
+        composite.lockFocus()
+        // Draw the base glyph tinted to the menu-bar text color so it matches native template look.
+        let tint = NSColor.controlTextColor
+        if let tinted = menuBar.copy() as? NSImage {
+            tinted.isTemplate = false
+            tinted.lockFocus()
+            tint.set()
+            NSRect(origin: .zero, size: size).fill(using: .sourceAtop)
+            tinted.unlockFocus()
+            tinted.draw(in: NSRect(origin: .zero, size: size))
+        } else {
+            menuBar.draw(in: NSRect(origin: .zero, size: size))
+        }
+        // Amber dot in the top-right corner.
+        let dotDiameter: CGFloat = 7
+        let dotRect = NSRect(x: size.width - dotDiameter, y: size.height - dotDiameter,
+                             width: dotDiameter, height: dotDiameter)
+        NSColor(calibratedRed: 0.878, green: 0.584, blue: 0.184, alpha: 1).setFill()  // #e0952f
+        NSBezierPath(ovalIn: dotRect).fill()
+        composite.unlockFocus()
+        composite.isTemplate = false  // keep the amber dot in color
+        return composite
+    }
 }
 
 @main struct BrewBarApp: App {
@@ -65,14 +99,21 @@ enum BrandImages {
         MenuBarExtra {
             Dashboard(model: model)
                 .preferredColorScheme(model.preferredScheme)
-                .onAppear { delegate.model = model; model.applyAppearance() }
+                .onAppear { delegate.model = model; model.applyAppearance(); model.startBackgroundUpdateChecks() }
         } label: {
             Label {
-                Text(model.busy ? "BrewBar — Running" : "BrewBar")
+                Text(menuBarTitle)
             } icon: {
-                Image(nsImage: BrandImages.menuBar)
+                Image(nsImage: BrandImages.menuBarBadged(count: model.updateCount, running: model.busy))
             }
         }.menuBarExtraStyle(.window)
+    }
+
+    /// The menu-bar label text: shows a running state, else an update count when any are pending.
+    private var menuBarTitle: String {
+        if model.busy { return "BrewBar — Running" }
+        if model.updateCount > 0 { return "BrewBar — \(model.updateCount) update\(model.updateCount == 1 ? "" : "s")" }
+        return "BrewBar"
     }
 }
 
@@ -179,6 +220,23 @@ struct Dashboard: View {
                     .help("Run brew \(action.command)")
                 }
             }
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.up.arrow.down.square").font(.system(size: 17)).foregroundStyle(theme.accent).frame(width: 25, height: 25)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Brewfile backup").font(.system(size: 13, weight: .semibold)).foregroundStyle(theme.text)
+                    Text("Save your setup, or restore it from a Brewfile.").font(.system(size: 10)).foregroundStyle(theme.secondaryText)
+                }
+                Spacer(minLength: 6)
+                Button("Export") { model.exportBrewfile() }
+                    .controlSize(.small).help("Save a Brewfile with brew bundle dump")
+                Button("Restore") { model.chooseBrewfileToRestore() }
+                    .controlSize(.small).help("Install from a Brewfile with brew bundle install")
+            }.disabled(model.busy || !model.ready)
+            .padding(.horizontal, 11).padding(.vertical, 8)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.surfaceBorder))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Brewfile backup. Export saves your setup; Restore installs from a Brewfile.")
             }
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
@@ -246,6 +304,27 @@ struct Dashboard: View {
                     .background(theme.warning.opacity(0.12))
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("\(recovery.message) \(recovery.actionTitle), or Dismiss.")
+                    Divider()
+                }
+                if let restore = model.brewfileRestoreCandidate, !model.busy {
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.and.arrow.down.on.square").foregroundStyle(theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Restore from this Brewfile?").font(.system(size: 11, weight: .semibold)).foregroundStyle(theme.text)
+                            Text(restore.lastPathComponent).font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.secondaryText)
+                                .lineLimit(1).truncationMode(.middle).help(restore.path)
+                        }
+                        Spacer(minLength: 8)
+                        Button { model.cancelRestoreBrewfile() } label: { Text("Cancel") }
+                            .buttonStyle(.bordered).controlSize(.small)
+                        Button { model.confirmRestoreBrewfile() } label: { Label("Install", systemImage: "square.and.arrow.down") }
+                            .buttonStyle(.borderedProminent).controlSize(.small).disabled(!model.ready)
+                            .help("Run brew bundle install with the chosen Brewfile")
+                    }
+                    .font(.system(size: 11)).padding(10)
+                    .background(theme.accent.opacity(0.10))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Restore from Brewfile \(restore.lastPathComponent). Install or Cancel.")
                     Divider()
                 }
                 HStack(spacing: 12) {

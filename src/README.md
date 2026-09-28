@@ -189,6 +189,20 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.22: Update badge, package info popover, and Brewfile backup/restore
+
+Three features in one release.
+
+**Menu-bar update badge.** BrewBar now checks for outdated packages in the background — once about 8 seconds after launch, then every 6 hours — and shows the count in the menu-bar label ("BrewBar — 3 updates") plus a small amber dot composited onto the Terminal-Mug glyph. The background check runs on its own `CommandRunner` (never through `execute`), so it never writes to the console, never toggles `busy`, and is skipped entirely while a foreground command is running — it can't collide with anything you do. `updateCount` is also set by the normal manual Check. Implemented as `BrewModel.backgroundCheckUpdates()` + `startBackgroundUpdateChecks()` (a launch delay + a repeating `Timer`, each hop wrapped in `Task { @MainActor }`), and `BrandImages.menuBarBadged(count:running:)` which returns the plain template glyph when there's nothing pending (so the OS still tints it) or a non-template composite with the amber dot when updates exist.
+
+**Per-package info popover.** Every package row (Installed, Search & Install, and Updates) gained an ⓘ button that opens a popover with the description, version, dependencies, install size (formulae), caveats, and a homepage link that opens in the default browser. A new pure, AppKit-free `PackageInfo` model + `PackageInfo.parse` decodes `brew info --json=v2 <token>` (formula `dependencies` + `installed[].installed_size`; cask `depends_on.formula`/`.cask`; `caveats`; a `homepageIsValid` guard that only allows http(s) URLs to be opened). `BrewModel.fetchInfo(token:kind:id:)` captures the JSON quietly to a temp file (like `refreshInstalled`, so the console isn't spammed), gated by the one-command `!busy` invariant, and drops the result if the user closed the popover meanwhile. `PackageInfoPopover` renders the loading/error/detail states.
+
+**Brewfile backup & restore.** The Maintenance tab gained a Brewfile row: **Export** shows a save panel and runs `brew bundle dump --force --describe --file=<path>`; **Restore** shows an open panel, then a confirmation bar in the console (mirroring the install/uninstall confirm pattern) before running `brew bundle install --file=<path>`. The chosen path is passed as a single argv element (no shell interpolation). A successful restore marks the installed inventory and updates as stale.
+
+Tests: `PackageInfo` parsing (formula deps/size/caveats, cask `depends_on`, homepage guard, byte formatting, preamble tolerance) in RunnerTests; model-level flow tests in UninstallTests for `fetchInfo` (arms target + loading, populates `packageInfo`, dismiss + invalid-token guards), Brewfile restore (`bundle install` with the chosen file, cancel/no-candidate no-ops), and `updateCount` reflecting the latest outdated check. `PackageInfo.swift` added to both `test.sh` swiftc lines.
+
+Optimized arm64 build verified; the built bundle reports version 1.22 (build 24).
+
 ## Version 1.21: Prevent the leftover-app cask failure at the source
 
 v1.20 added a one-click recovery for the `It seems there is already an App at '…'` cask-upgrade failure. This release prevents it from happening in the first place for the common case. The failure only occurs on a **targeted** single-package upgrade (`brew upgrade --cask <name>`, which the Updates tab's per-package Upgrade button runs); Homebrew's auto-upgrade path (a bare `brew upgrade`, which Upgrade All and a Terminal `brew upgrade` use) already replaces such casks cleanly. Self-updating apps (WhatsApp, Chrome, …) overwrite their own `.app` and drift out of sync with the Caskroom, so the targeted upgrade trips on the leftover artifact while the bare upgrade does not.
