@@ -140,7 +140,7 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
 
         // Recovery flow: a fake brew that fails a `upgrade --cask postman` with the curl-56 resume
         // signature. The model must (1) set `recovery` with the extracted token on the failure, and
-        // (2) on retryAfterCacheClear run `cleanup postman` first, then re-run the original upgrade.
+        // (2) on performRecovery run `cleanup postman` first, then re-run the original upgrade.
         // A marker file lets the fake brew succeed on the *second* upgrade so the retry ends clean.
         let marker = folder.appendingPathComponent("retry-marker")
         let resumeBrew = folder.appendingPathComponent("resume-brew")
@@ -167,23 +167,59 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         pump { !model.busy }
         precondition(model.failed && model.exitCode == 1, "First upgrade should fail")
         guard let rec = model.recovery else { preconditionFailure("A resume failure must offer recovery") }
+        precondition(rec.kind == .resumableDownload, "Wrong recovery kind: \(rec.kind)")
         precondition(rec.token == "postman" && rec.isCask == true, "Recovery token/kind wrong: \(String(describing: rec.token))")
         // Retry: clears the cache (cleanup postman), then re-runs the original upgrade, which now
         // succeeds (marker present). Recovery is cleared once the retry starts.
-        model.retryAfterCacheClear()
+        model.performRecovery()
         precondition(model.recovery == nil, "Retry must clear the recovery offer")
         pump { !model.busy }
         precondition(model.output.contains("cleanup\npostman"), "Retry should run `brew cleanup postman` first")
         precondition(model.exitCode == 0, "Re-run after cache clear should succeed")
         precondition(model.recovery == nil, "A successful retry leaves no recovery offer")
-        // Guard: retryAfterCacheClear is a no-op when there is no recovery offer.
-        model.retryAfterCacheClear()
+        // Guard: performRecovery is a no-op when there is no recovery offer.
+        model.performRecovery()
         precondition(!model.busy, "No recovery → retry does nothing")
         // dismissRecovery clears the offer without running anything.
-        model.recovery = RecoveryHint(token: "x", isCask: false)
+        model.recovery = RecoveryHint(kind: .resumableDownload, token: "x", isCask: false)
         model.dismissRecovery()
         precondition(model.recovery == nil && !model.busy, "Dismiss clears the offer without acting")
         print("PASS: resumable-download recovery detects token, clears cache, re-runs, and clears the offer")
+
+        // Stale-app-artifact recovery: a fake brew that fails `upgrade --cask whatsapp` with the
+        // "already an App at" error, then succeeds when re-run with `--force`. The model must set
+        // recovery (kind .staleAppArtifact, token whatsapp), and performRecovery re-runs the exact
+        // command with --force appended.
+        let forceMarker = folder.appendingPathComponent("force-marker")
+        let staleBrew = folder.appendingPathComponent("stale-brew")
+        try """
+        #!/bin/sh
+        printf '%s\\n' "$@"
+        if [ "$1" = "upgrade" ]; then
+          for a in "$@"; do [ "$a" = "--force" ] && { printf '==> Upgrading whatsapp\\n'; exit 0; }; done
+          printf "==> Upgrading whatsapp\\n"
+          printf "Error: whatsapp: It seems there is already an App at '/opt/homebrew/Caskroom/whatsapp/26.38.20/WhatsApp.app'.\\n" >&2
+          exit 1
+        fi
+        exit 0
+        """.write(to: staleBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: staleBrew.path)
+        _ = forceMarker  // reserved for future use; kept for symmetry
+        model.brewPath = staleBrew.path
+        model.recovery = nil
+        model.run(BrewAction(command: "upgrade", title: "Upgrade", detail: "", icon: ""))
+        pump { !model.busy }
+        precondition(model.failed && model.exitCode == 1, "Stale-artifact upgrade should fail first")
+        guard let stale = model.recovery else { preconditionFailure("A stale-artifact failure must offer recovery") }
+        precondition(stale.kind == .staleAppArtifact, "Wrong recovery kind: \(stale.kind)")
+        precondition(stale.token == "whatsapp" && stale.isCask == true, "Stale token/kind wrong: \(String(describing: stale.token))")
+        model.performRecovery()
+        precondition(model.recovery == nil, "Force retry must clear the recovery offer")
+        pump { !model.busy }
+        precondition(model.output.contains("--force"), "Force retry should re-run the command with --force")
+        precondition(model.exitCode == 0, "Re-run with --force should succeed")
+        precondition(model.recovery == nil, "A successful force retry leaves no recovery offer")
+        print("PASS: stale-app-artifact recovery detects token, force-retries, and clears the offer")
     }
     static func pump(_ done: () -> Bool) {
         let end = Date().addingTimeInterval(12)

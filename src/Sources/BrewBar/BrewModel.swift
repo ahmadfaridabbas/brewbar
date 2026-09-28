@@ -446,31 +446,45 @@ struct BrewAction: Identifiable {
         runner?.send(proceed ? "y" : "n")
     }
 
-    /// Recover from a resumable-download failure: clear the stale cached download, then re-run the
-    /// exact command that failed. `brew cleanup <token>` deletes the partial file curl couldn't
-    /// resume (and any other stale downloads for that package); the follow-up fetch starts fresh.
-    /// When brew didn't name a package we fall back to a global `brew cleanup`. Both use fixed
-    /// arguments (no shell interpolation), matching every other command in the app.
-    func retryAfterCacheClear() {
+    /// Recover from a detected failure by running the fix appropriate to its kind, then re-running
+    /// (or forcing) the exact command that failed. Console output is preserved so the user sees the
+    /// whole recovery story in one log. All commands use fixed arguments (no shell interpolation),
+    /// matching every other command in the app.
+    func performRecovery() {
         guard ready, !busy, let hint = recovery else { return }
         let command = lastArguments
         guard !command.isEmpty else { return }
-        var cleanupArguments = ["cleanup"]
-        if let token = hint.token,
-           token.range(of: "^[A-Za-z0-9][A-Za-z0-9@+._/-]*$", options: .regularExpression) != nil {
-            cleanupArguments.append(token)
-        }
         recovery = nil
-        // Stage one: clear the cache. Then, regardless of cleanup's exit, re-run the original command
-        // (preserving the console so the user sees the whole recovery story in one log).
-        execute(arguments: cleanupArguments) { [weak self] _, cancelled in
-            guard let self = self, !cancelled else { return }
-            self.execute(arguments: command, preserveOutput: true) { [weak self] code, cancelled in
-                guard let self = self else { return }
-                // Mirror the side effects the original command would have triggered.
-                self.inventoryStale = true; self.updatesStale = true
-                if code == 0 && !cancelled { self.checkUpdates(preserveOutput: true) }
+        switch hint.kind {
+        case .resumableDownload:
+            // Stage one: clear the stale cached download. `brew cleanup <token>` deletes the partial
+            // file curl couldn't resume; fall back to a global cleanup when brew didn't name a
+            // package. Then, regardless of cleanup's exit, re-run the original command.
+            var cleanupArguments = ["cleanup"]
+            if let token = hint.token,
+               token.range(of: "^[A-Za-z0-9][A-Za-z0-9@+._/-]*$", options: .regularExpression) != nil {
+                cleanupArguments.append(token)
             }
+            execute(arguments: cleanupArguments) { [weak self] _, cancelled in
+                guard let self = self, !cancelled else { return }
+                self.rerunOriginal(command)
+            }
+        case .staleAppArtifact:
+            // The leftover `.app` blocks the install; re-run the exact command with `--force`
+            // appended (unless it's already there) so brew overwrites the existing artifact.
+            var forced = command
+            if !forced.contains("--force") { forced.append("--force") }
+            rerunOriginal(forced)
+        }
+    }
+
+    /// Re-run a maintenance command as part of a recovery, preserving the console log and mirroring
+    /// the side effects the original command would have triggered.
+    private func rerunOriginal(_ command: [String]) {
+        execute(arguments: command, preserveOutput: true) { [weak self] code, cancelled in
+            guard let self = self else { return }
+            self.inventoryStale = true; self.updatesStale = true
+            if code == 0 && !cancelled { self.checkUpdates(preserveOutput: true) }
         }
     }
 

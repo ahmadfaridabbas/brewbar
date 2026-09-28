@@ -189,6 +189,14 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.20: Recover from a leftover-app cask upgrade failure
+
+Some cask upgrades (e.g. `brew upgrade --cask whatsapp`) can fail with `Error: <token>: It seems there is already an App at '…'.` — an older `.app` from the previous version is still in place and blocks the install, so brew stops with a non-zero exit. Previously the only fix was to drop to a Terminal and re-run with `--force` by hand. BrewBar now detects this failure and offers a one-click recovery, reusing the recovery-bar infrastructure introduced in v1.19.
+
+Implementation: the pure, AppKit-free `RecoveryHint` model gained a `Kind` enum (`.resumableDownload`, `.staleAppArtifact`) that drives the message, primary-button title/symbol, and recovery action. `RecoveryHintDetector` now scans for the distinctive `It seems there is already an App at` phrase and extracts the affected token from the `Error: <token>:` prefix (always a cask, since only casks carry the `.app` artifact); the resumable-download detection is unchanged and still takes its own path. On a matching non-cancelled failure, `BrewModel` publishes the hint and the console recovery bar shows **Force Retry** + **Dismiss**. `performRecovery()` (the generalized successor to `retryAfterCacheClear()`) dispatches on the hint's kind: clear-cache-then-rerun for downloads, or re-run the exact failed command with `--force` appended (fixed args, no shell interpolation) for the stale artifact — output preserved so the whole recovery story stays in one console log, with updates re-checked on success. Added stale-artifact detection tests (token/cask flag, force-retry action, false-positive guard) and a full flow test (fake brew fails `upgrade` with the "already an App" signature → recovery set kind `.staleAppArtifact` token `whatsapp` → `performRecovery()` re-runs with `--force` to exit 0 → recovery cleared).
+
+Optimized arm64 build verified; the built bundle reports version 1.20 (build 22).
+
 ## Version 1.19: Recover from Homebrew's "cannot resume" download dead-end
 
 Some cask upgrades (e.g. `brew upgrade --cask postman`) can fail with `curl: (56) HTTP server doesn't seem to support byte ranges. Cannot resume.` — a stale partial download sits in Homebrew's cache and the CDN refuses a Range request, so brew keeps trying to resume and hits a dead-end. Previously the only fix was to drop to a Terminal and run `brew cleanup <package>` by hand. BrewBar now detects this failure and offers a one-click recovery.

@@ -179,6 +179,7 @@ import Darwin
         guard let hint = RecoveryHintDetector.detect(in: curl56Output) else {
             preconditionFailure("curl-56 resume failure should be detected")
         }
+        precondition(hint.kind == .resumableDownload, "curl-56 should be a resumable-download hint")
         precondition(hint.token == "postman", "Bad token: \(String(describing: hint.token))")
         precondition(hint.isCask == true, "postman is a cask")
         precondition(hint.message.contains("postman") && hint.message.contains("resuming"),
@@ -198,6 +199,29 @@ import Darwin
         precondition(RecoveryHintDetector.detect(in: "Error: Cask 'foo' is not installed.") == nil)
         precondition(RecoveryHintDetector.detect(in: "") == nil)
         print("PASS: recovery hint detection (curl-56 resume, formula/cask token, false-positive guards)")
+
+        // Stale-app-artifact: a cask upgrade blocked by a leftover .app ("It seems there is already
+        // an App at …") is detected as a distinct kind, with a --force-based recovery.
+        let staleOutput = """
+        ==> Upgrading whatsapp
+          26.38.20 -> 26.39.12
+        ==> Purging files for version 26.39.12 of Cask whatsapp
+        Error: whatsapp: It seems there is already an App at '/opt/homebrew/Caskroom/whatsapp/26.38.20/WhatsApp.app'.
+        """
+        guard let staleHint = RecoveryHintDetector.detect(in: staleOutput) else {
+            preconditionFailure("Stale-artifact failure should be detected")
+        }
+        precondition(staleHint.kind == .staleAppArtifact, "Should be a stale-artifact hint")
+        precondition(staleHint.token == "whatsapp", "Bad stale token: \(String(describing: staleHint.token))")
+        precondition(staleHint.isCask == true, "A stale-artifact failure is always a cask")
+        precondition(staleHint.actionTitle == "Force Retry", "Stale hint uses a Force Retry action")
+        precondition(staleHint.message.contains("whatsapp") && staleHint.message.lowercased().contains("force"),
+                     "Stale message should name the package and mention force: \(staleHint.message)")
+        // The stale-artifact phrase wins over an unrelated line, and a message without the phrase
+        // is not mistaken for one.
+        precondition(RecoveryHintDetector.detect(in: "Error: some other cask problem") == nil)
+        print("PASS: stale-app-artifact detection (token, cask flag, force-retry action)")
+
 
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }

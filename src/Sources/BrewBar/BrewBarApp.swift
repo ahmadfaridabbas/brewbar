@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.19"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.20"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -237,15 +237,15 @@ struct Dashboard: View {
                         Button { model.dismissRecovery() } label: { Text("Dismiss") }
                             .buttonStyle(.bordered).controlSize(.small)
                             .help("Hide this suggestion")
-                        Button { model.retryAfterCacheClear() } label: { Label("Clear Cache & Retry", systemImage: "arrow.clockwise") }
+                        Button { model.performRecovery() } label: { Label(recovery.actionTitle, systemImage: recovery.actionSymbol) }
                             .buttonStyle(.borderedProminent).controlSize(.small)
                             .disabled(!model.ready)
-                            .help("Clear the stale cached download, then run the command again")
+                            .help(recovery.actionHelp)
                     }
                     .font(.system(size: 11)).padding(10)
                     .background(theme.warning.opacity(0.12))
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(recovery.message) Clear Cache and Retry, or Dismiss.")
+                    .accessibilityLabel("\(recovery.message) \(recovery.actionTitle), or Dismiss.")
                     Divider()
                 }
                 HStack(spacing: 12) {
