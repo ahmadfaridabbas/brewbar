@@ -8,8 +8,11 @@ import Darwin
         precondition(updates.count == 3)
         let jpeg = updates.first { $0.name == "jpeg-xl" }!
         precondition(jpeg.currentVersion == "0.12.0_1" && jpeg.installedVersions == ["0.12.0"])
-        precondition(jpeg.arguments == ["upgrade", "--formula", "jpeg-xl"])
-        precondition(updates.first { $0.kind == "App" }!.arguments == ["upgrade", "--cask", "test-app"])
+        precondition(jpeg.arguments == ["upgrade", "--formula", "jpeg-xl"], "Formula upgrade must NOT force")
+        // Casks get --force so a targeted single-package upgrade doesn't dead-end on a stale .app
+        // ("It seems there is already an App at …"), matching brew's bare-upgrade behavior.
+        precondition(updates.first { $0.kind == "App" }!.arguments == ["upgrade", "--cask", "--force", "test-app"],
+                     "Targeted cask upgrade must pass --force")
         precondition(try! PackageUpdate.parse(Data(#"{"formulae":[],"casks":[]}"#.utf8)).isEmpty)
         do { _ = try PackageUpdate.parse(Data("{}".utf8)); preconditionFailure("Invalid update data accepted") } catch {}
         // Regression: brew prints "==> Downloading Homebrew API data" to stdout before the JSON

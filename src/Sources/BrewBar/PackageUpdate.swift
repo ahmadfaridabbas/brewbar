@@ -8,7 +8,18 @@ struct PackageUpdate: Identifiable, Decodable {
     var kind = "Formula"
     var id: String { kind + ":" + name }
     var valid: Bool { name.range(of: "^[A-Za-z0-9][A-Za-z0-9@+._/-]*$", options: .regularExpression) != nil }
-    var arguments: [String] { ["upgrade", kind == "App" ? "--cask" : "--formula", name] }
+    /// A targeted upgrade command for this package. Casks get `--force`: a per-package
+    /// `brew upgrade --cask <name>` refuses (`It seems there is already an App at '…'`) when a
+    /// stale `.app` from the previous version is still in the Caskroom — common for self-updating
+    /// apps (WhatsApp, Chrome, …). Homebrew's auto-upgrade path (a bare `brew upgrade`, used by
+    /// Upgrade All) replaces such casks cleanly; `--force` makes the targeted single-package upgrade
+    /// behave the same way instead of hitting that dead-end. Formulae never carry a `.app` artifact,
+    /// so they stay plain (no `--force`).
+    var arguments: [String] {
+        kind == "App"
+            ? ["upgrade", "--cask", "--force", name]
+            : ["upgrade", "--formula", name]
+    }
     enum CodingKeys: String, CodingKey { case name, installedVersions = "installed_versions", currentVersion = "current_version", pinned }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

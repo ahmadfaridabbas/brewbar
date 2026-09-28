@@ -189,6 +189,14 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.21: Prevent the leftover-app cask failure at the source
+
+v1.20 added a one-click recovery for the `It seems there is already an App at '…'` cask-upgrade failure. This release prevents it from happening in the first place for the common case. The failure only occurs on a **targeted** single-package upgrade (`brew upgrade --cask <name>`, which the Updates tab's per-package Upgrade button runs); Homebrew's auto-upgrade path (a bare `brew upgrade`, which Upgrade All and a Terminal `brew upgrade` use) already replaces such casks cleanly. Self-updating apps (WhatsApp, Chrome, …) overwrite their own `.app` and drift out of sync with the Caskroom, so the targeted upgrade trips on the leftover artifact while the bare upgrade does not.
+
+Implementation: `PackageUpdate.arguments` now appends `--force` for casks only — `["upgrade", "--cask", "--force", name]` — so a per-package cask upgrade behaves like brew's auto-upgrade and overwrites the stale app instead of dead-ending. Formulae never carry a `.app` artifact and are unchanged (`["upgrade", "--formula", name]`, no `--force`). The v1.20 Force Retry recovery bar stays as a safety net for any residual case. Updated the arguments test to expect `--force` on casks and to assert formulae do **not** force.
+
+Optimized arm64 build verified; the built bundle reports version 1.21 (build 23).
+
 ## Version 1.20: Recover from a leftover-app cask upgrade failure
 
 Some cask upgrades (e.g. `brew upgrade --cask whatsapp`) can fail with `Error: <token>: It seems there is already an App at '…'.` — an older `.app` from the previous version is still in place and blocks the install, so brew stops with a non-zero exit. Previously the only fix was to drop to a Terminal and re-run with `--force` by hand. BrewBar now detects this failure and offers a one-click recovery, reusing the recovery-bar infrastructure introduced in v1.19.
