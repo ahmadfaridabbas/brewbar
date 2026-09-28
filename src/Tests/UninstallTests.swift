@@ -221,6 +221,13 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         precondition(model.recovery == nil, "A successful force retry leaves no recovery offer")
         print("PASS: stale-app-artifact recovery detects token, force-retries, and clears the offer")
 
+        // Feature 4 — Brewfile export arguments must NOT include the removed `--describe` switch
+        // (current Homebrew rejects it). Descriptions are the default; export stays force + file.
+        let dumpArgs = BrewModel.brewfileDumpArguments(path: "/tmp/Brewfile")
+        precondition(dumpArgs == ["bundle", "dump", "--force", "--file=/tmp/Brewfile"], "Bad dump args: \(dumpArgs)")
+        precondition(!dumpArgs.contains("--describe"), "--describe is disabled in current Homebrew and must not be passed")
+        print("PASS: Brewfile dump arguments are force + file only (no disabled --describe)")
+
         // Feature 4 — Brewfile restore: a fake brew that echoes its args and exits 0. A confirmed
         // restore must run `brew bundle install --file=<path>`; cancel must run nothing.
         let bundleBrew = folder.appendingPathComponent("bundle-brew")

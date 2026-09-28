@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.23: Brewfile export fixes
+
+Two fixes to the v1.22 Brewfile feature.
+
+**Export no longer passes the disabled `--describe` switch.** `brew bundle dump --force --describe` failed on current Homebrew (7.x) with `Error: Calling the '--describe' switch is disabled! Use the default behaviour instead.` — the switch was removed and description comments are now the default. Export now runs `brew bundle dump --force --file=<path>` (descriptions still included). Added a test that pins the exact dump arguments and asserts `--describe` is never passed.
+
+**Save/Open panels now open in front.** The Export save panel and Restore open panel could appear *behind* the BrewBar window. A `MenuBarExtra(.window)` app (LSUIElement) isn't "active" like a normal app, so a freshly created `NSSavePanel`/`NSOpenPanel` wasn't brought forward. Both panels now call `NSApplication.shared.activate(ignoringOtherApps:)` and raise the panel to `.modalPanel` level immediately before `runModal()`, so they appear on top.
+
+Optimized arm64 build verified; the built bundle reports version 1.23 (build 25).
+
 ## Version 1.22: Update badge, package info popover, and Brewfile backup/restore
 
 Three features in one release.

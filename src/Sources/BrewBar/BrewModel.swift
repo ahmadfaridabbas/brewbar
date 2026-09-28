@@ -662,10 +662,27 @@ struct BrewAction: Identifiable {
         updateCheckTimer = timer
     }
 
+    /// The exact `brew bundle dump` arguments for exporting a Brewfile to `path`. Kept as a pure
+    /// helper so a test can pin the flag set — current Homebrew (7+) removed `--describe` and errors
+    /// out if it's passed, so this must stay `dump --force --file=<path>` (descriptions are the
+    /// default). `--force` overwrites any existing file at the path.
+    static func brewfileDumpArguments(path: String) -> [String] {
+        ["bundle", "dump", "--force", "--file=\(path)"]
+    }
+
     /// Export the current Homebrew setup to a Brewfile (Feature 4). Shows a save panel (default name
     /// `Brewfile` in the home folder), then runs `brew bundle dump --file=<path> --force` — fixed
     /// args, the only interpolated value being the user-picked path from the panel (not shell-parsed;
     /// passed as a single argv element). Output stays in the console like any other command.
+    /// Bring the app + a panel to the front before running it modally. A `MenuBarExtra(.window)`
+    /// app (LSUIElement) is not "active" the way a regular app is, so `NSSavePanel`/`NSOpenPanel`
+    /// can open BEHIND the BrewBar panel. Activating the app and raising the panel's window level
+    /// ensures it appears in front. Call immediately before `runModal()`.
+    private func bringPanelToFront(_ panel: NSSavePanel) {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        panel.level = .modalPanel
+    }
+
     func exportBrewfile() {
         guard ready, !busy else { return }
         let panel = NSSavePanel()
@@ -674,10 +691,12 @@ struct BrewAction: Identifiable {
         panel.nameFieldStringValue = "Brewfile"
         panel.canCreateDirectories = true
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        bringPanelToFront(panel)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         // `--force` overwrites an existing file at the chosen path (the user already confirmed the
-        // save panel's own replace prompt). `--describe` adds helpful comments to the Brewfile.
-        execute(arguments: ["bundle", "dump", "--force", "--describe", "--file=\(url.path)"]) { [weak self] code, cancelled in
+        // save panel's own replace prompt). Description comments are Homebrew's default; we don't
+        // pass `--describe` because current Homebrew (7+) removed that switch and rejects it.
+        execute(arguments: Self.brewfileDumpArguments(path: url.path)) { [weak self] code, cancelled in
             guard let self = self else { return }
             if code == 0 && !cancelled { self.append("Brewfile saved to \(url.path)\n") }
         }
@@ -692,6 +711,7 @@ struct BrewAction: Identifiable {
         panel.message = "Choose a Brewfile to install its formulae, casks, and taps."
         panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        bringPanelToFront(panel)  // NSOpenPanel is an NSSavePanel subclass; same front-ordering fix.
         guard panel.runModal() == .OK, let url = panel.url else { return }
         brewfileRestoreCandidate = url
     }
