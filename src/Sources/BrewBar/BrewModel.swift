@@ -674,13 +674,36 @@ struct BrewAction: Identifiable {
     /// `Brewfile` in the home folder), then runs `brew bundle dump --file=<path> --force` — fixed
     /// args, the only interpolated value being the user-picked path from the panel (not shell-parsed;
     /// passed as a single argv element). Output stays in the console like any other command.
-    /// Bring the app + a panel to the front before running it modally. A `MenuBarExtra(.window)`
-    /// app (LSUIElement) is not "active" the way a regular app is, so `NSSavePanel`/`NSOpenPanel`
-    /// can open BEHIND the BrewBar panel. Activating the app and raising the panel's window level
-    /// ensures it appears in front. Call immediately before `runModal()`.
-    private func bringPanelToFront(_ panel: NSSavePanel) {
-        NSApplication.shared.activate(ignoringOtherApps: true)
+    /// Bring the app + a panel to the front before running it modally, and return the previous
+    /// activation policy so the caller can restore it afterward.
+    ///
+    /// A `MenuBarExtra(.window)` app is an `LSUIElement`/accessory app: it never becomes a real
+    /// foreground app, so a modal `NSSavePanel`/`NSOpenPanel` can't reliably own focus and opens
+    /// BEHIND the high-level BrewBar popover (it appears as a stranded, unfocused window). Merely
+    /// calling `activate(ignoringOtherApps:)` + raising the panel level is not enough.
+    ///
+    /// The fix is to temporarily promote the app to `.regular` so it becomes a normal foreground
+    /// app that can present a focused, front-most modal panel. `restoreActivationPolicy(_:)` puts
+    /// it back to `.accessory` once the panel closes. Call immediately before `runModal()`.
+    @discardableResult
+    private func bringPanelToFront(_ panel: NSSavePanel) -> NSApplication.ActivationPolicy {
+        let app = NSApplication.shared
+        let previous = app.activationPolicy()
+        app.setActivationPolicy(.regular)
+        app.activate(ignoringOtherApps: true)
         panel.level = .modalPanel
+        // Order the panel in front and make it key so keyboard focus lands in the name field.
+        panel.makeKeyAndOrderFront(nil)
+        return previous
+    }
+
+    /// Restore the activation policy captured by `bringPanelToFront(_:)` after the modal panel has
+    /// closed, so the app goes back to being a menu-bar-only accessory (no Dock icon).
+    private func restoreActivationPolicy(_ policy: NSApplication.ActivationPolicy) {
+        // Only demote back to accessory; if it was already regular for some reason, leave it.
+        if policy != .regular {
+            NSApplication.shared.setActivationPolicy(policy)
+        }
     }
 
     func exportBrewfile() {
@@ -691,8 +714,10 @@ struct BrewAction: Identifiable {
         panel.nameFieldStringValue = "Brewfile"
         panel.canCreateDirectories = true
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        bringPanelToFront(panel)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let previousPolicy = bringPanelToFront(panel)
+        let response = panel.runModal()
+        restoreActivationPolicy(previousPolicy)
+        guard response == .OK, let url = panel.url else { return }
         // `--force` overwrites an existing file at the chosen path (the user already confirmed the
         // save panel's own replace prompt). Description comments are Homebrew's default; we don't
         // pass `--describe` because current Homebrew (7+) removed that switch and rejects it.
@@ -711,8 +736,10 @@ struct BrewAction: Identifiable {
         panel.message = "Choose a Brewfile to install its formulae, casks, and taps."
         panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        bringPanelToFront(panel)  // NSOpenPanel is an NSSavePanel subclass; same front-ordering fix.
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let previousPolicy = bringPanelToFront(panel)  // NSOpenPanel is an NSSavePanel subclass; same front-ordering fix.
+        let response = panel.runModal()
+        restoreActivationPolicy(previousPolicy)
+        guard response == .OK, let url = panel.url else { return }
         brewfileRestoreCandidate = url
     }
 
