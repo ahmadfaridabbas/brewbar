@@ -189,6 +189,14 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.26: In-app update check + Quit cleanup
+
+**Check for Updates (Phase 1).** BrewBar now notices when a newer version has been released. A lightweight background check (shortly after launch, then every 6 hours) queries the GitHub Releases API for the latest tag and compares it to the running version. When a newer release exists it's surfaced in two places: an **Options → Check for Updates…** item (which becomes **Download Update — X…**), and a small tappable **"Update available — X"** pill under the version text in the header. Clicking either opens the GitHub release page to download the new build. This is the detect-and-guide phase — it does not replace the app in place (a one-click self-update is a planned follow-up). The check is fail-safe (any network/parse error simply leaves the state as "no update", never a false nag) and never blocks the UI. The version comparison is a pure, unit-tested helper (`AppUpdate.isNewer`) that tolerates `v`-prefixed tags and pre-release suffixes.
+
+**Removed the duplicate Quit.** The Options menu previously had a second "Quit BrewBar" item in addition to the header Quit button, which also meant `⌘Q` was bound twice — and the menu item wasn't guarded against quitting mid-command like the header button is. The menu item is gone; the single busy-guarded Quit button in the header remains (and `AppDelegate.applicationShouldTerminate` still warns if you try to quit while Homebrew is running).
+
+Optimized arm64 build verified; the built bundle reports version 1.26 (build 28). All 19 test suites pass, including new coverage for the update version-compare, tag parsing, and fail-safe guards.
+
 ## Version 1.25: Parallel-download console block
 
 Fixes the garbled console text and mismatched progress bar seen when Homebrew downloads multiple casks at once (its default parallel download queue).

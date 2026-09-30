@@ -177,6 +177,25 @@ import Darwin
         precondition(DownloadProgressParser.bytes(value: "2", unit: "GB") == Int64(2) * 1024 * 1024 * 1024)
         print("PASS: download progress parsing (start/advance/finish), file-name extraction, byte summary")
 
+        // AppUpdate (Phase 1): version parsing + strictly-newer comparison, tag normalization.
+        precondition(AppUpdate.versionComponents("v1.26") == [1, 26])
+        precondition(AppUpdate.versionComponents("1.26.1") == [1, 26, 1])
+        precondition(AppUpdate.versionComponents("v1.26-beta") == [1, 26], "pre-release suffix should drop")
+        precondition(AppUpdate.versionComponents("nightly").isEmpty, "non-numeric tag yields no components")
+        precondition(AppUpdate.isNewer("v1.26", than: "1.25"), "1.26 > 1.25")
+        precondition(AppUpdate.isNewer("1.26.1", than: "1.26"), "1.26.1 > 1.26")
+        precondition(AppUpdate.isNewer("v2.0", than: "1.99"), "2.0 > 1.99")
+        precondition(!AppUpdate.isNewer("1.25", than: "1.25"), "equal is not newer")
+        precondition(!AppUpdate.isNewer("1.24", than: "1.25"), "older is not newer")
+        precondition(!AppUpdate.isNewer("garbage", than: "1.25"), "unparseable candidate fails safe")
+        precondition(!AppUpdate.isNewer("1.26", than: "garbage"), "unparseable current fails safe")
+        // tag_name extraction from a GitHub releases/latest payload.
+        let relJSON = Data(#"{"tag_name":"v1.26","name":"BrewBar 1.26","draft":false}"#.utf8)
+        precondition(AppUpdate.tagName(fromLatestReleaseJSON: relJSON) == "v1.26")
+        precondition(AppUpdate.displayVersion(fromTag: "v1.26") == "1.26")
+        precondition(AppUpdate.tagName(fromLatestReleaseJSON: Data("{}".utf8)) == nil, "missing tag → nil")
+        print("PASS: app update version compare, tag parse, and fail-safe guards")
+
         // RecoveryHint: a resumable-download dead-end (curl-56 / "Cannot resume") is detected and the
         // affected package token + kind are extracted from brew's "Download failed on Cask 'x'" line.
         let curl56Output = """

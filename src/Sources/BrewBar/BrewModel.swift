@@ -73,6 +73,17 @@ struct BrewAction: Identifiable {
     // Menu-bar update badge (Feature 1). Count of outdated packages from the most recent check
     // (manual or the silent background check). Drives the menu-bar label + glyph dot.
     @Published var updateCount = 0
+    // In-app update check (Phase 1). Detect-and-guide: a background check compares the latest
+    // GitHub release tag to the running app version and, when newer, surfaces it in the Options
+    // menu and a header banner. Clicking opens the release page (no self-replace yet).
+    @Published var appUpdateAvailable = false
+    /// The latest available app version (display form, e.g. "1.26"), when a newer release exists.
+    @Published var latestAppVersion: String?
+    /// True while a manual "Check for Updates…" is in flight (drives the menu label/spinner).
+    @Published var checkingAppUpdate = false
+    /// A short status from the most recent manual check ("You're up to date." / an error), shown
+    /// briefly in the Options menu. Nil when there's nothing to say.
+    @Published var appUpdateStatus: String?
     // Brewfile restore confirmation (Feature 4). Holds the chosen Brewfile URL awaiting the user's
     // confirmation before `brew bundle install` runs (mirrors the install/uninstall confirm pattern).
     @Published var brewfileRestoreCandidate: URL?
@@ -686,10 +697,62 @@ struct BrewAction: Identifiable {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
             Task { @MainActor in self?.backgroundCheckUpdates() }
         }
+        // Check for a new BrewBar release shortly after launch too (independent of Homebrew).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            Task { @MainActor in self?.checkForAppUpdate() }
+        }
         let timer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.backgroundCheckUpdates() }
+            Task { @MainActor in self?.backgroundCheckUpdates(); self?.checkForAppUpdate() }
         }
         updateCheckTimer = timer
+    }
+
+    /// The GitHub release check task, kept so a manual check won't stack concurrent requests.
+    private var appUpdateTask: URLSessionDataTask?
+
+    /// Check GitHub Releases for a newer BrewBar and update the Phase-1 state. `manual` shows
+    /// transient feedback in the Options menu ("You're up to date." / an error); the silent
+    /// background check leaves `appUpdateStatus` untouched on the up-to-date/failure paths so it
+    /// never nags. Never blocks the UI (async URLSession), and fails safe: any error leaves
+    /// `appUpdateAvailable` false.
+    func checkForAppUpdate(manual: Bool = false) {
+        guard appUpdateTask == nil else { return }
+        if manual { checkingAppUpdate = true; appUpdateStatus = nil }
+        var request = URLRequest(url: AppUpdate.latestReleaseAPI)
+        request.timeoutInterval = 12
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.26"
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.appUpdateTask = nil
+                self.checkingAppUpdate = false
+                guard let data = data, error == nil,
+                      (response as? HTTPURLResponse)?.statusCode == 200,
+                      let tag = AppUpdate.tagName(fromLatestReleaseJSON: data) else {
+                    if manual { self.appUpdateStatus = "Couldn't check for updates. Try again later." }
+                    return
+                }
+                let latest = AppUpdate.displayVersion(fromTag: tag)
+                if AppUpdate.isNewer(tag, than: current) {
+                    self.appUpdateAvailable = true
+                    self.latestAppVersion = latest
+                    if manual { self.appUpdateStatus = "BrewBar \(latest) is available." }
+                } else {
+                    self.appUpdateAvailable = false
+                    self.latestAppVersion = nil
+                    if manual { self.appUpdateStatus = "You're up to date." }
+                }
+            }
+        }
+        appUpdateTask = task
+        task.resume()
+    }
+
+    /// Open the GitHub release page so the user can download the new version (Phase 1: guided
+    /// download, not an in-place self-replace).
+    func openAppReleasePage() {
+        NSWorkspace.shared.open(AppUpdate.latestReleasePage)
     }
 
     /// The exact `brew bundle dump` arguments for exporting a Brewfile to `path`. Kept as a pure

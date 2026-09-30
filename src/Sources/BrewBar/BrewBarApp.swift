@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.25"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.26"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -143,13 +143,38 @@ struct Dashboard: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(theme.tertiaryText)
                         .accessibilityLabel("App \(AppInfo.versionString)")
+                    if model.appUpdateAvailable, let latest = model.latestAppVersion {
+                        Button { model.openAppReleasePage() } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.down.circle.fill").font(.system(size: 9))
+                                Text("Update available — \(latest)")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Image(systemName: "arrow.up.forward").font(.system(size: 8))
+                            }
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(theme.accent.opacity(0.15), in: Capsule())
+                            .foregroundStyle(theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .help("BrewBar \(latest) is available — open the download page")
+                        .accessibilityLabel("Update available, BrewBar \(latest). Opens the download page.")
+                    }
                 }
                 Spacer()
                 Menu {
+                    if model.appUpdateAvailable, let latest = model.latestAppVersion {
+                        Button("Download Update — \(latest)…") { model.openAppReleasePage() }
+                    } else {
+                        Button(model.checkingAppUpdate ? "Checking for Updates…" : "Check for Updates…") {
+                            model.checkForAppUpdate(manual: true)
+                        }.disabled(model.checkingAppUpdate)
+                    }
+                    if let status = model.appUpdateStatus {
+                        Text(status)
+                    }
+                    Divider()
                     Button("Retry Homebrew Detection") { model.prepare() }.disabled(model.busy)
                     Link("Homebrew Documentation", destination: URL(string: "https://docs.brew.sh/Manpage")!)
-                    Divider()
-                    Button("Quit BrewBar") { NSApp.terminate(nil) }.keyboardShortcut("q")
                 } label: {
                     Label("Options", systemImage: "ellipsis.circle")
                 }
