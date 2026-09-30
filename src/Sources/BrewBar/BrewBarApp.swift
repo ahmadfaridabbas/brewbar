@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.26.1"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.27"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -143,27 +143,39 @@ struct Dashboard: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(theme.tertiaryText)
                         .accessibilityLabel("App \(AppInfo.versionString)")
-                    if model.appUpdateAvailable, let latest = model.latestAppVersion {
-                        Button { model.openAppReleasePage() } label: {
+                    if model.installingUpdate {
+                        HStack(spacing: 4) {
+                            ProgressView().controlSize(.small).scaleEffect(0.6)
+                            Text("\(model.updateInstallStage.isEmpty ? "Updating" : model.updateInstallStage) \(Int(model.updateInstallProgress * 100))%")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(theme.accent.opacity(0.15), in: Capsule())
+                        .foregroundStyle(theme.accent)
+                        .accessibilityLabel("Updating BrewBar, \(Int(model.updateInstallProgress * 100)) percent")
+                    } else if model.appUpdateAvailable, let latest = model.latestAppVersion {
+                        Button { model.installUpdate() } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "arrow.down.circle.fill").font(.system(size: 9))
-                                Text("Update available — \(latest)")
+                                Text("Update to \(latest)")
                                     .font(.system(size: 10, weight: .semibold))
-                                Image(systemName: "arrow.up.forward").font(.system(size: 8))
                             }
                             .padding(.horizontal, 7).padding(.vertical, 2)
                             .background(theme.accent.opacity(0.15), in: Capsule())
                             .foregroundStyle(theme.accent)
                         }
                         .buttonStyle(.plain)
-                        .help("BrewBar \(latest) is available — open the download page")
-                        .accessibilityLabel("Update available, BrewBar \(latest). Opens the download page.")
+                        .help("Download and install BrewBar \(latest), then relaunch")
+                        .accessibilityLabel("Update to BrewBar \(latest). Downloads, installs, and relaunches.")
                     }
                 }
                 Spacer()
                 Menu {
-                    if model.appUpdateAvailable, let latest = model.latestAppVersion {
-                        Button("Download Update — \(latest)…") { model.openAppReleasePage() }
+                    if model.installingUpdate {
+                        Text(model.updateInstallStage.isEmpty ? "Updating…" : "\(model.updateInstallStage) \(Int(model.updateInstallProgress * 100))%")
+                    } else if model.appUpdateAvailable, let latest = model.latestAppVersion {
+                        Button("Update to \(latest)") { model.installUpdate() }
+                        Button("View Release Notes…") { model.openAppReleasePage() }
                     } else {
                         Button(model.checkingAppUpdate ? "Checking for Updates…" : "Check for Updates…") {
                             model.checkForAppUpdate(manual: true)

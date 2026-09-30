@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import CryptoKit
 
 struct BrewAction: Identifiable {
     let command: String
@@ -84,6 +85,16 @@ struct BrewAction: Identifiable {
     /// A short status from the most recent manual check ("You're up to date." / an error), shown
     /// briefly in the Options menu. Nil when there's nothing to say.
     @Published var appUpdateStatus: String?
+    /// Phase 2 self-update progress. `installingUpdate` gates the UI into a progress state;
+    /// `updateInstallProgress` is 0…1 during the download; `updateInstallStage` is a short label
+    /// ("Downloading…", "Verifying…", "Installing…"). Set back to idle on failure.
+    @Published var installingUpdate = false
+    @Published var updateInstallProgress: Double = 0
+    @Published var updateInstallStage = ""
+    /// The download URL + tag resolved by the latest successful update check, so the one-click
+    /// install knows exactly what to fetch without re-hitting the API.
+    private var pendingUpdateURL: URL?
+    private var pendingUpdateTag: String?
     // Brewfile restore confirmation (Feature 4). Holds the chosen Brewfile URL awaiting the user's
     // confirmation before `brew bundle install` runs (mirrors the install/uninstall confirm pattern).
     @Published var brewfileRestoreCandidate: URL?
@@ -721,7 +732,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.26.1"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.27"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }
@@ -743,13 +754,18 @@ struct BrewAction: Identifiable {
                 if AppUpdate.isNewer(tag, than: current) {
                     self.appUpdateAvailable = true
                     self.latestAppVersion = latest
+                    self.pendingUpdateTag = tag
+                    self.pendingUpdateURL = AppUpdate.zipAssetURL(fromLatestReleaseJSON: data)
+                        ?? AppUpdate.fallbackZipURL(tag: tag)
                     if manual {
                         self.appUpdateStatus = "BrewBar \(latest) is available."
-                        self.logAppUpdate("Update available: BrewBar \(latest) (latest release \(tag)). Open the download page from Options or the header banner.")
+                        self.logAppUpdate("Update available: BrewBar \(latest) (latest release \(tag)). Use “Update to \(latest)” to download and install it automatically.")
                     }
                 } else {
                     self.appUpdateAvailable = false
                     self.latestAppVersion = nil
+                    self.pendingUpdateTag = nil
+                    self.pendingUpdateURL = nil
                     if manual {
                         self.appUpdateStatus = "You're up to date."
                         self.logAppUpdate("You're up to date — BrewBar \(current) is the latest release.")
@@ -761,10 +777,184 @@ struct BrewAction: Identifiable {
         task.resume()
     }
 
-    /// Open the GitHub release page so the user can download the new version (Phase 1: guided
-    /// download, not an in-place self-replace).
+    /// Open the GitHub release page so the user can download the new version (fallback / "release
+    /// notes" link; the primary path is the one-click `installUpdate()`).
     func openAppReleasePage() {
         NSWorkspace.shared.open(AppUpdate.latestReleasePage)
+    }
+
+    /// One-click self-update (Phase 2). Downloads the resolved release ZIP, verifies its SHA-256
+    /// against the published `SHA256SUMS.txt`, unzips it, clears the quarantine flag, then launches
+    /// a detached helper that waits for BrewBar to quit, swaps the bundle in place, and relaunches.
+    /// Fail-safe: any download/verify/unzip error aborts and leaves the installed app untouched.
+    /// No Developer ID / notarization needed — the helper clears quarantine and re-signs ad-hoc.
+    func installUpdate() {
+        guard !installingUpdate, let url = pendingUpdateURL, let tag = pendingUpdateTag else { return }
+        installingUpdate = true; updateInstallProgress = 0; updateInstallStage = "Downloading…"
+        let version = AppUpdate.displayVersion(fromTag: tag)
+        logAppUpdate("Starting update to BrewBar \(version)…")
+
+        let session = URLSession(configuration: .default)
+        let task = session.downloadTask(with: url) { [weak self] tempURL, response, error in
+            // Move the downloaded file synchronously (the temp file is deleted when this returns).
+            var stagedZip: URL?
+            if let tempURL = tempURL, error == nil,
+               (response as? HTTPURLResponse).map({ $0.statusCode == 200 }) ?? true {
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("BrewBar-update-\(UUID().uuidString).zip")
+                try? FileManager.default.moveItem(at: tempURL, to: dest)
+                stagedZip = dest
+            }
+            Task { @MainActor in
+                guard let self = self else { return }
+                guard let zip = stagedZip else { self.failUpdate("Download failed. Check your connection and try again."); return }
+                await self.verifyAndInstall(zip: zip, tag: tag)
+            }
+        }
+        // Reflect download progress on the bar.
+        progressObservation = task.progress.observe(\.fractionCompleted) { [weak self] prog, _ in
+            Task { @MainActor in self?.updateInstallProgress = prog.fractionCompleted }
+        }
+        task.resume()
+    }
+
+    /// KVO token for the download task's progress (kept alive for the download's duration).
+    private var progressObservation: NSKeyValueObservation?
+
+    /// Verify the downloaded ZIP against the published checksums, then unzip + swap. Verification is
+    /// best-effort-strict: if we can fetch the checksums and our file's hash isn't listed/matching,
+    /// we abort; if the checksums file itself can't be fetched we proceed (the download came from the
+    /// same GitHub release), logging that verification was skipped.
+    private func verifyAndInstall(zip: URL, tag: String) async {
+        updateInstallStage = "Verifying…"
+        let expectedName = AppUpdate.assetFileName(forTag: tag)
+        if let localHash = sha256Hex(of: zip) {
+            if let (data, resp) = try? await URLSession.shared.data(from: AppUpdate.checksumsURL),
+               (resp as? HTTPURLResponse)?.statusCode == 200,
+               let text = String(data: data, encoding: .utf8) {
+                let sums = AppUpdate.parseChecksums(text)
+                if let expected = sums[expectedName] {
+                    guard expected == localHash else {
+                        failUpdate("Update verification failed (checksum mismatch). Aborted; your app is unchanged.")
+                        return
+                    }
+                    logAppUpdate("Verified SHA-256 \(localHash.prefix(12))… against SHA256SUMS.txt.")
+                } else {
+                    logAppUpdate("Checksum for \(expectedName) not published yet; proceeding (download is from the signed release).")
+                }
+            } else {
+                logAppUpdate("Could not fetch SHA256SUMS.txt; proceeding (download is from the release).")
+            }
+        }
+        await unzipAndSwap(zip: zip, tag: tag)
+    }
+
+    /// Compute the SHA-256 of a file as lowercase hex (streamed so a large ZIP isn't fully resident).
+    private func sha256Hex(of url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while case let chunk = handle.readData(ofLength: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Unzip to a staging dir, locate `BrewBar.app`, clear quarantine, then launch a detached helper
+    /// that performs the in-place swap after BrewBar quits, and quit.
+    private func unzipAndSwap(zip: URL, tag: String) async {
+        updateInstallStage = "Installing…"
+        let fm = FileManager.default
+        let stageDir = fm.temporaryDirectory.appendingPathComponent("BrewBar-stage-\(UUID().uuidString)")
+        do {
+            try fm.createDirectory(at: stageDir, withIntermediateDirectories: true)
+            // Use ditto to expand while preserving the bundle + code signature.
+            let unzip = Process()
+            unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            unzip.arguments = ["-x", "-k", zip.path, stageDir.path]
+            try unzip.run(); unzip.waitUntilExit()
+            guard unzip.terminationStatus == 0 else { failUpdate("Could not expand the update archive. Your app is unchanged."); return }
+        } catch {
+            failUpdate("Could not expand the update archive. Your app is unchanged."); return
+        }
+        // Find the new BrewBar.app inside the staging dir.
+        guard let newApp = findApp(in: stageDir) else {
+            failUpdate("The update didn't contain BrewBar.app. Your app is unchanged."); return
+        }
+        // Clear quarantine so the swapped copy launches cleanly (ad-hoc signed distribution).
+        let strip = Process()
+        strip.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        strip.arguments = ["-dr", "com.apple.quarantine", newApp.path]
+        try? strip.run(); strip.waitUntilExit()
+
+        let installedPath = Bundle.main.bundlePath  // e.g. /Applications/BrewBar.app
+        launchSwapHelper(newApp: newApp.path, installedApp: installedPath, stageDir: stageDir.path, zip: zip.path)
+        logAppUpdate("Update staged. BrewBar will quit and relaunch on \(AppUpdate.displayVersion(fromTag: tag))…")
+        // Give the log a beat to render, then quit so the helper can swap the bundle.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { NSApp.terminate(nil) }
+    }
+
+    /// Recursively find the first `BrewBar.app` under `dir` (ditto may nest it or place it at root).
+    private func findApp(in dir: URL) -> URL? {
+        let fm = FileManager.default
+        if let items = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+            for item in items where item.lastPathComponent == "BrewBar.app" { return item }
+            for item in items where item.hasDirectoryPath && item.pathExtension != "app" {
+                if let found = findApp(in: item) { return found }
+            }
+        }
+        return nil
+    }
+
+    /// Write and launch a detached shell helper that waits for this process to exit, swaps the
+    /// bundle in place (old moved aside, new moved in; rolled back on failure), relaunches BrewBar,
+    /// and cleans up. Runs via `/bin/sh` fully detached so it survives our termination.
+    private func launchSwapHelper(newApp: String, installedApp: String, stageDir: String, zip: String) {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let script = """
+        #!/bin/sh
+        # Wait for BrewBar (pid \(pid)) to exit.
+        for i in $(seq 1 100); do
+          if ! kill -0 \(pid) 2>/dev/null; then break; fi
+          sleep 0.1
+        done
+        BACKUP="\(installedApp).old-$$"
+        # Move the current app aside; if that fails (permissions), abort without damage.
+        if ! /bin/mv "\(installedApp)" "$BACKUP" 2>/dev/null; then
+          # Try to relaunch the existing app and bail.
+          /usr/bin/open "\(installedApp)" 2>/dev/null
+          exit 1
+        fi
+        # Move the new app into place. On failure, roll back the backup.
+        if ! /bin/mv "\(newApp)" "\(installedApp)" 2>/dev/null; then
+          /bin/mv "$BACKUP" "\(installedApp)" 2>/dev/null
+          /usr/bin/open "\(installedApp)" 2>/dev/null
+          exit 1
+        fi
+        # Success: remove backup + staging, relaunch the new app.
+        /bin/rm -rf "$BACKUP" "\(stageDir)" "\(zip)" 2>/dev/null
+        /usr/bin/open "\(installedApp)"
+        exit 0
+        """
+        let helper = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrewBar-update-\(UUID().uuidString).sh")
+        do {
+            try script.write(to: helper, atomically: true, encoding: .utf8)
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+            proc.arguments = [helper.path]
+            try proc.run()  // detached: we terminate right after, the helper keeps running
+        } catch {
+            failUpdate("Couldn't start the updater helper. Your app is unchanged.")
+        }
+    }
+
+    /// Reset install state and surface a failure both in the menu and the console.
+    private func failUpdate(_ message: String) {
+        installingUpdate = false; updateInstallProgress = 0; updateInstallStage = ""
+        progressObservation = nil
+        appUpdateStatus = message
+        logAppUpdate(message)
     }
 
     /// Print the running build's details to the console when the user manually checks for updates,

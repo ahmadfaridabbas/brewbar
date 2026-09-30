@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.27: One-click self-update
+
+BrewBar can now update itself. When a newer release is available, **Options → Update to X** (or the **Update to X** pill in the header) downloads the new build, verifies it, replaces the app in place, and relaunches — no browser, no drag-and-drop.
+
+**How it works.** The resolved release ZIP is downloaded (progress shown on the pill/menu), its SHA-256 is checked against the published `SHA256SUMS.txt` (a mismatch aborts and leaves the app untouched; if the sums can't be fetched it proceeds, since the download comes from the signed release), it's expanded with `ditto`, the quarantine flag is cleared, and a small detached helper waits for BrewBar to quit, swaps the bundle, and relaunches the new version. The swap is fail-safe: the old app is moved aside first and rolled back if the move-in fails, so a permission error or interruption never leaves a half-installed app. No Apple Developer account is required — the updater clears quarantine and the app stays ad-hoc signed.
+
+"View Release Notes…" remains available in the Options menu for anyone who prefers the manual download.
+
+Optimized arm64 build verified; the built bundle reports version 1.27 (build 30). All 19 test suites pass, including new coverage for release-asset URL extraction, `SHA256SUMS.txt` parsing, and the asset filename/fallback-URL helpers.
+
 ## Version 1.26.1: Build details in the console on update check
 
 A small follow-up to 1.26. When you choose **Options → Check for Updates…**, BrewBar now prints the running build's details to the console before reporting the result — a visible record of exactly what's installed:

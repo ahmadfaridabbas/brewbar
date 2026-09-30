@@ -69,4 +69,54 @@ enum AppUpdate {
         if let first = s.first, first == "v" || first == "V" { s.removeFirst() }
         return s
     }
+
+    // MARK: - Phase 2: download + self-update
+
+    /// Extract the `.zip` asset's `browser_download_url` from the GitHub `releases/latest` JSON.
+    /// This is the robust source of the download URL (independent of naming). Returns nil when the
+    /// release has no zip asset.
+    static func zipAssetURL(fromLatestReleaseJSON data: Data) -> URL? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let assets = object["assets"] as? [[String: Any]] else { return nil }
+        for asset in assets {
+            if let name = asset["name"] as? String, name.lowercased().hasSuffix(".zip"),
+               let urlString = asset["browser_download_url"] as? String,
+               let url = URL(string: urlString) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// A fallback download URL derived from the tag when the JSON has no usable asset entry:
+    /// `https://github.com/<repo>/releases/download/<tag>/BrewBar-<version>.zip`.
+    static func fallbackZipURL(tag: String) -> URL? {
+        let version = displayVersion(fromTag: tag)
+        return URL(string: "https://github.com/\(repo)/releases/download/\(tag)/BrewBar-\(version).zip")
+    }
+
+    /// The `SHA256SUMS.txt` published alongside the download on the website, used to verify a
+    /// self-update before installing it. (The website copy is stable and CORS-free.)
+    static var checksumsURL: URL {
+        URL(string: "https://ahmadfaridabbas.github.io/brewbar/downloads/SHA256SUMS.txt")!
+    }
+
+    /// Parse a `SHA256SUMS.txt` (`<hex>␠␠<filename>` lines) into a filename→hash map (lowercased).
+    /// Tolerates the single- or double-space separator produced by `shasum`.
+    static func parseChecksums(_ text: String) -> [String: String] {
+        var map: [String: String] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard parts.count >= 2 else { continue }
+            let hash = String(parts[0]).lowercased()
+            let file = String(parts[parts.count - 1])
+            if hash.count == 64, hash.allSatisfy({ $0.isHexDigit }) { map[file] = hash }
+        }
+        return map
+    }
+
+    /// The expected asset filename for a tag, e.g. `v1.27` → `BrewBar-1.27.zip`.
+    static func assetFileName(forTag tag: String) -> String {
+        "BrewBar-\(displayVersion(fromTag: tag)).zip"
+    }
 }
