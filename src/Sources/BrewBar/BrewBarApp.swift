@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.27"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.27.1"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -230,7 +230,7 @@ struct Dashboard: View {
                 Text("Maintenance").tag("Maintenance")
                 Text("Installed").tag("Installed")
                 Text(model.updatesLoaded ? "Updates (\(model.updates.count))" : "Updates").tag("Updates")
-            }.pickerStyle(.segmented)
+            }.pickerStyle(.segmented).focusable(false).hideSegmentedFocusRing()
             if model.selectedTab == "Installed" {
                 InstalledView(model: model)
             } else if model.selectedTab == "Updates" {
@@ -573,5 +573,45 @@ struct LiveDownloads: View {
         .padding(10)
         .background(theme.accent.opacity(0.08))
         .accessibilityElement(children: .contain)
+    }
+}
+
+
+/// Suppresses the AppKit keyboard focus ring on a SwiftUI segmented `Picker`.
+///
+/// SwiftUI's `.segmented` picker style is backed by an `NSSegmentedControl`. When it (or its window)
+/// takes first responder, AppKit draws a blue focus ring around the selected segment. SwiftUI's
+/// `.focusable(false)` doesn't reliably stop this, so we reach the backing control through the view
+/// hierarchy and set `focusRingType = .none`. Rendered as a zero-size background so it never affects
+/// layout.
+private struct SegmentedFocusRingSuppressor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let probe = NSView(frame: .zero)
+        DispatchQueue.main.async { Self.disableFocusRing(near: probe) }
+        return probe
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { Self.disableFocusRing(near: nsView) }
+    }
+
+    /// Walk up to the nearest common ancestor and back down to find sibling segmented controls.
+    private static func disableFocusRing(near probe: NSView) {
+        guard let container = probe.superview else { return }
+        applyRecursively(from: container)
+    }
+
+    private static func applyRecursively(from view: NSView) {
+        if let segmented = view as? NSSegmentedControl {
+            segmented.focusRingType = .none
+        }
+        for subview in view.subviews { applyRecursively(from: subview) }
+    }
+}
+
+extension View {
+    /// Removes the blue keyboard focus ring drawn around a `.segmented` picker's selected segment.
+    func hideSegmentedFocusRing() -> some View {
+        background(SegmentedFocusRingSuppressor().frame(width: 0, height: 0))
     }
 }

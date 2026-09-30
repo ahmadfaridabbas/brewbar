@@ -189,6 +189,10 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.27.1: Segmented-tab focus-ring fix
+
+Fixes a visual glitch where the selected tab in the **Maintenance / Installed / Updates** segmented control (and the **Installed / Search & Install** mode toggle) drew a stray blue macOS keyboard focus ring around the active segment. SwiftUI's `.focusable(false)` doesn't reliably suppress the ring that AppKit paints on the underlying `NSSegmentedControl`, so a small `NSViewRepresentable` (`SegmentedFocusRingSuppressor`, applied via a `.hideSegmentedFocusRing()` view modifier) now reaches the backing control and sets `focusRingType = .none`. Rendered as a zero-size background, so layout is unaffected. Build 31; all 19 test suites pass.
+
 ## Version 1.27: One-click self-update
 
 BrewBar can now update itself. When a newer release is available, **Options → Update to X** (or the **Update to X** pill in the header) downloads the new build, verifies it, replaces the app in place, and relaunches — no browser, no drag-and-drop.

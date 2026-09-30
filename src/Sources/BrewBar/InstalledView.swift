@@ -11,7 +11,7 @@ struct InstalledView: View {
             Picker("Mode", selection: $model.installedTabMode) {
                 Text("Installed").tag("Installed")
                 Text("Search & Install").tag("Search")
-            }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Installed tab mode")
+            }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Installed tab mode").hideSegmentedFocusRing()
 
             if searchMode { searchModeView } else { installedModeView }
         }.frame(height: 300)
