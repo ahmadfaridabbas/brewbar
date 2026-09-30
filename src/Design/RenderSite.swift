@@ -171,7 +171,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     let quitR = NSRect(x: cx - quitW, y: top - 30, width: quitW, height: 22)
     fill(quitR, t.card, radius: 6); strokeRect(quitR, t.line, radius: 6)
     symbol("power", NSRect(x: quitR.minX + 8, y: quitR.midY - 6, width: 12, height: 12), color: t.red)
-    text(quitLabel, NSPoint(x: quitR.minX + 24, y: quitR.midY - 7), size: 11, color: t.ink, weight: .medium)
+    text(quitLabel, NSPoint(x: quitR.minX + 24, y: quitR.midY - 7), size: 11, color: t.red, weight: .medium)
     cx = quitR.minX - 8
     // Close button
     let closeW = measure(closeLabel, 11, weight: .medium) + 34
@@ -180,17 +180,21 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     symbol("xmark.circle", NSRect(x: closeR.minX + 8, y: closeR.midY - 6, width: 12, height: 12), color: t.muted)
     text(closeLabel, NSPoint(x: closeR.minX + 24, y: closeR.midY - 7), size: 11, color: t.ink, weight: .medium)
     cx = closeR.minX - 10
-    // Options button (bordered, matches Close/Quit — ellipsis + chevron)
-    let optsW: CGFloat = 44
+    // Options button (bordered, matches Close/Quit — ellipsis icon + "Options" label + chevron)
+    let optsLabel = "Options"
+    let optsW: CGFloat = measure(optsLabel, 11, weight: .medium) + 48
     let optsR = NSRect(x: cx - optsW, y: top - 30, width: optsW, height: 22)
     fill(optsR, t.card, radius: 6); strokeRect(optsR, t.line, radius: 6)
-    symbol("ellipsis", NSRect(x: optsR.minX + 8, y: optsR.midY - 6, width: 14, height: 12), color: t.ink)
-    symbol("chevron.down", NSRect(x: optsR.maxX - 16, y: optsR.midY - 5, width: 9, height: 10), color: t.muted)
+    symbol("ellipsis.circle", NSRect(x: optsR.minX + 8, y: optsR.midY - 6, width: 12, height: 12), color: t.ink)
+    text(optsLabel, NSPoint(x: optsR.minX + 24, y: optsR.midY - 7), size: 11, color: t.ink, weight: .medium)
+    symbol("chevron.down", NSRect(x: optsR.maxX - 15, y: optsR.midY - 5, width: 9, height: 10), color: t.muted)
     top -= 74
 
-    // Appearance row — a menu-style popup showing the current mode (5 options: System, Light,
-    // Dark, Papery Light, Papery Dark), matching the app's .menu picker.
-    text("APPEARANCE", NSPoint(x: pad, y: top - 12), size: 11, color: t.muted, weight: .medium)
+    // Appearance row — an icon + "Appearance" label on the left (matches the app's
+    // Label("Appearance", systemImage:)), then a menu-style popup showing the current mode.
+    let apprIcon = t.papery ? "doc.plaintext" : (t.dark ? "moon.fill" : "sun.max.fill")
+    symbol(apprIcon, NSRect(x: pad, y: top - 20, width: 13, height: 13), color: t.muted)
+    text("Appearance", NSPoint(x: pad + 20, y: top - 20), size: 11, color: t.muted, weight: .medium)
     let menuLabel = t.appearanceLabel
     let menuW: CGFloat = max(120, measure(menuLabel, 12, weight: .medium) + 46)
     let menuH: CGFloat = 24
@@ -201,9 +205,13 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     symbol("chevron.up.chevron.down", NSRect(x: menuRect.maxX - 22, y: menuRect.midY - 7, width: 11, height: 14), color: t.muted)
     top -= 34
 
-    // Tab picker
-    let tabW = panelW, tabH: CGFloat = 26
-    let tabRect = NSRect(x: pad, y: top - tabH, width: tabW, height: tabH)
+    // Tab picker — the app's Picker("Section", …) shows its "Section" label to the left,
+    // so the segmented control sits to the right of that label (not full-width).
+    let sectionLabel = "Section"
+    text(sectionLabel, NSPoint(x: pad, y: top - 18), size: 12, color: t.ink)
+    let tabX = pad + measure(sectionLabel, 12) + 12
+    let tabW = width - pad - tabX, tabH: CGFloat = 26
+    let tabRect = NSRect(x: tabX, y: top - tabH, width: tabW, height: tabH)
     fill(tabRect, t.card, radius: 6); strokeRect(tabRect, t.line, radius: 6)
     let tabs = ["Maintenance", "Installed", "Updates (7)"]
     let activeTab = (tab == .installed || tab == .search) ? 1 : (tab == .updates ? 2 : 0)
@@ -232,6 +240,21 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
             text("brew \(a.command)", NSPoint(x: x + 42, y: r.maxY - 58), size: 10, color: t.muted, mono: true)
         }
         top -= cardH * 3 + gap * 2 + 12
+        // Brewfile backup row (icon + title/subtitle on the left, Export/Restore on the right).
+        let bfH: CGFloat = 52
+        let bfR = NSRect(x: pad, y: top - bfH, width: panelW, height: bfH)
+        fill(bfR, t.card, radius: 12); strokeRect(bfR, t.line, radius: 12)
+        symbol("arrow.up.arrow.down.square", NSRect(x: pad + 12, y: bfR.midY - 9, width: 18, height: 18), color: t.accent)
+        text("Brewfile backup", NSPoint(x: pad + 40, y: bfR.midY + 2), size: 13, color: t.ink, weight: .semibold)
+        text("Save your setup, or restore it from a Brewfile.", NSPoint(x: pad + 40, y: bfR.midY - 16), size: 10, color: t.muted)
+        let restoreW: CGFloat = 58, exportW: CGFloat = 58, btnH: CGFloat = 22
+        let restoreR = NSRect(x: bfR.maxX - 12 - restoreW, y: bfR.midY - btnH/2, width: restoreW, height: btnH)
+        strokeRect(restoreR, t.line, radius: 6)
+        text("Restore", NSPoint(x: restoreR.midX - measure("Restore", 11, weight: .medium)/2, y: restoreR.midY - 7), size: 11, color: t.accent, weight: .medium)
+        let exportR = NSRect(x: restoreR.minX - 8 - exportW, y: bfR.midY - btnH/2, width: exportW, height: btnH)
+        strokeRect(exportR, t.line, radius: 6)
+        text("Export", NSPoint(x: exportR.midX - measure("Export", 11, weight: .medium)/2, y: exportR.midY - 7), size: 11, color: t.accent, weight: .medium)
+        top -= bfH + 12
     case .installed:
         let rows = [("wget", "Internet file retriever", "1.25.0", "Formula"),
                     ("ripgrep", "Fast recursive search tool", "14.1.1", "Formula"),
@@ -342,7 +365,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     fill(consoleRect, t.console, radius: 12); strokeRect(consoleRect, t.line, radius: 12)
     let chY = consoleRect.maxY - 30
     symbol("terminal", NSRect(x: pad + 12, y: chY + 6, width: 14, height: 14), color: t.ink)
-    text(running ? "brew upgrade" : "Console", NSPoint(x: pad + 32, y: chY + 6), size: 12, color: t.ink, weight: .medium, mono: true)
+    text(running ? "brew upgrade" : "brew outdated", NSPoint(x: pad + 32, y: chY + 6), size: 12, color: t.ink, weight: .medium, mono: true)
     let dotColor = running ? t.accent : t.green
     fill(NSRect(x: consoleRect.maxX - 92, y: chY + 9, width: 7, height: 7), dotColor, radius: 3.5)
     text(running ? "Running" : "Succeeded", NSPoint(x: consoleRect.maxX - 78, y: chY + 5), size: 11, color: t.ink, weight: .medium)
@@ -377,9 +400,16 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     if running { fill(stopR, t.red, radius: 5); text("Stop", NSPoint(x: stopR.minX + 16, y: stopR.midY - 7), size: 11, color: .white, weight: .medium) }
     else { strokeRect(stopR, t.line, radius: 5); text("Stop", NSPoint(x: stopR.minX + 16, y: stopR.midY - 7), size: 11, color: t.muted) }
 
-    text("/opt/homebrew/bin/brew", NSPoint(x: pad, y: pad - 2), size: 10, color: t.muted, mono: true)
+    // Footer — two lines, matching the app.
+    // Top line: run status (left) + license/copyright (right).
+    let statusLeft = running ? "Started 10:24 AM · Running" : "Started 10:24 AM · Exit 0 · 1s"
+    text(statusLeft, NSPoint(x: pad, y: pad + 10), size: 10, color: t.muted)
+    let license = "MIT License · © 2026 Ahmad Farid Abbas"
+    text(license, NSPoint(x: width - pad - measure(license, 10), y: pad + 10), size: 10, color: t.muted)
+    // Bottom line: brew path (left) + tagline (right).
+    text("/opt/homebrew/bin/brew", NSPoint(x: pad, y: pad - 6), size: 10, color: t.muted, mono: true)
     let ftr = "One command at a time"
-    text(ftr, NSPoint(x: width - pad - measure(ftr, 10), y: pad - 2), size: 10, color: t.muted)
+    text(ftr, NSPoint(x: width - pad - measure(ftr, 10), y: pad - 6), size: 10, color: t.muted)
 
     NSGraphicsContext.restoreGraphicsState()
     return bmp
