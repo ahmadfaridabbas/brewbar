@@ -567,18 +567,28 @@ struct BrewAction: Identifiable {
     /// Appends `text` to `output`, treating a bare carriage return as "move to the start of the
     /// current line and overwrite it". This keeps live progress bars on one line and leaves the
     /// stored `output` clean for the Console view and the Copy button.
+    ///
+    /// Processes the incoming text in bulk segments split on `\r` rather than character-by-character.
+    /// A carriage return can rewrite the current line many times per second during brew's parallel
+    /// download queue; the old per-character loop did an O(n) `removeSubrange` on every `\r`, which
+    /// starved the main thread as `output` grew. This version does at most one line-truncation per
+    /// `\r` and appends whole segments, so cost is proportional to the incoming delta.
     private func append(_ text: String) {
-        for character in text {
-            if character == "\r" {
-                // Erase back to the start of the current line (after the last newline).
+        guard !text.isEmpty else { return }
+        // Split on carriage returns, keeping track so a trailing empty segment (text ended with \r)
+        // still erases the current line. `components(separatedBy:)` yields N+1 pieces for N returns.
+        let segments = text.components(separatedBy: "\r")
+        for (index, segment) in segments.enumerated() {
+            if index > 0 {
+                // A carriage return preceded this segment: erase back to the start of the current
+                // line (everything after the last newline).
                 if let newline = output.lastIndex(of: "\n") {
                     output.removeSubrange(output.index(after: newline)..<output.endIndex)
                 } else {
                     output.removeAll(keepingCapacity: true)
                 }
-            } else {
-                output.append(character)
             }
+            if !segment.isEmpty { output.append(segment) }
         }
         if output.utf8.count > limit {
             output = "[Earlier output trimmed; showing recent output]\n" + String(output.suffix(limit / 2))

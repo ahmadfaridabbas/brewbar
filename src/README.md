@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.24: Console performance & scroll-blanking fix
+
+Two fixes to the live command console, which could go blank while scrolling and made the menu-bar UI feel stuck during downloads.
+
+**Console no longer blanks on scroll.** The console was a single large, selectable SwiftUI `Text` inside a `ScrollView`. That combination intermittently rendered blank mid-scroll (the content height was correct — the scrollbar showed — but no glyphs drew), and it re-laid-out the entire log string on every `output` mutation. The console is now an `NSTextView` inside an `NSScrollView` (`ConsoleOutput: NSViewRepresentable`), which handles large, incrementally-appended, selectable monospaced logs without blanking and only re-lays-out the delta. Auto-scroll (Follow) is done with AppKit's `scrollToEndOfDocument` and only fires when the text actually changes.
+
+**Menu bar no longer lags during downloads.** With Homebrew's parallel download queue redrawing a byte-counter status line many times per second, the old per-character `append` loop did an O(n) `removeSubrange` on the whole `output` string on every carriage return, plus a SwiftUI `scrollTo` animation ~10×/second — starving the main actor so the `MenuBarExtra` felt stuck. `append` now processes incoming text in bulk segments split on `\r` (at most one line-truncation per carriage return), and the per-mutation SwiftUI scroll animation is gone (AppKit handles it). Combined with the `NSTextView` console, this keeps the main thread responsive while big casks download.
+
+Optimized arm64 build verified; the built bundle reports version 1.24 (build 26).
+
 ## Version 1.23: Brewfile export fixes
 
 Two fixes to the v1.22 Brewfile feature.

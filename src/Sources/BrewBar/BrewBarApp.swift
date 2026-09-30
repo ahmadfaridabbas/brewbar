@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.23"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.24"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -248,16 +248,8 @@ struct Dashboard: View {
                     Text(model.status).font(.system(size: 11, weight: .medium)).foregroundStyle(theme.text)
                 }.padding(12)
                 Divider()
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ConsoleOutput(output: model.output, theme: theme)
-                            Color.clear.frame(height: 1).id("end")
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                    }.frame(height: 140)
-                    .onChange(of: model.output) { _ in if model.follow { proxy.scrollTo("end", anchor: .bottom) } }
-                    .onChange(of: model.follow) { enabled in if enabled { proxy.scrollTo("end", anchor: .bottom) } }
-                }
+                ConsoleOutput(output: model.output, follow: model.follow, theme: theme)
+                    .frame(height: 140)
                 Divider()
                 if let progress = model.download {
                     DownloadProgressBar(progress: progress, theme: theme)
@@ -403,20 +395,88 @@ struct PaperGrain: View {
     }
 }
 
-/// The console's scrolling text. Extracted into its own view so the type-checker doesn't choke on
-/// the empty-state ternary combined with theme colors.
-struct ConsoleOutput: View {
+/// The console's scrolling text, backed by an `NSTextView` inside an `NSScrollView`.
+///
+/// A pure-SwiftUI `Text` (especially a large, selectable one) rendered inside a `ScrollView`
+/// intermittently blanks out mid-scroll and re-lays-out the whole string on every `output`
+/// mutation — which, during a `brew upgrade` with a live download counter updating ~10×/second,
+/// starves the main thread and makes the menu-bar UI feel stuck. AppKit's `NSTextView` handles
+/// large, incrementally-appended, selectable monospaced logs without blanking and only re-lays-out
+/// the delta, so it fixes both the blank-on-scroll and the download-time lag.
+struct ConsoleOutput: NSViewRepresentable {
     let output: String
+    let follow: Bool
     let theme: Theme
+
+    private static let placeholder = "Choose an action above.\nLive command output will appear here."
     private var isEmpty: Bool { output.isEmpty }
-    private var text: String { isEmpty ? "Choose an action above.\nLive command output will appear here." : output }
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11, design: .monospaced)).lineSpacing(4)
-            .foregroundStyle(isEmpty ? theme.secondaryText : theme.text)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
+    private var displayText: String { isEmpty ? Self.placeholder : output }
+    private var font: NSFont {
+        NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 12, height: 12)
+        textView.autoresizingMask = [.width]
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+
+        scrollView.documentView = textView
+        context.coordinator.textView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = context.coordinator.textView else { return }
+        let color = isEmpty ? NSColor(theme.secondaryText) : NSColor(theme.text)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 4
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: paragraph
+        ]
+
+        // Only rewrite storage when the text actually changed. This keeps typing/selection smooth
+        // and avoids re-laying-out the whole log on unrelated view updates (theme, follow toggle).
+        if context.coordinator.lastText != displayText {
+            context.coordinator.lastText = displayText
+            textView.textStorage?.setAttributedString(
+                NSAttributedString(string: displayText, attributes: attributes)
+            )
+        } else {
+            // Text unchanged but colors/theme may have: refresh attributes cheaply.
+            textView.textStorage?.addAttributes(
+                attributes,
+                range: NSRange(location: 0, length: textView.textStorage?.length ?? 0)
+            )
+        }
+
+        // Auto-scroll to the end only while Follow is on, and only when there's real output.
+        if follow && !isEmpty {
+            textView.scrollToEndOfDocument(nil)
+        }
+    }
+
+    final class Coordinator {
+        weak var textView: NSTextView?
+        var lastText: String?
     }
 }
 
