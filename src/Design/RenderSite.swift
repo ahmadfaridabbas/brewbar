@@ -365,7 +365,7 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     fill(consoleRect, t.console, radius: 12); strokeRect(consoleRect, t.line, radius: 12)
     let chY = consoleRect.maxY - 30
     symbol("terminal", NSRect(x: pad + 12, y: chY + 6, width: 14, height: 14), color: t.ink)
-    text(running ? "brew upgrade" : "brew outdated", NSPoint(x: pad + 32, y: chY + 6), size: 12, color: t.ink, weight: .medium, mono: true)
+    text(running ? "brew upgrade" : "brew outdated --json=v2", NSPoint(x: pad + 32, y: chY + 6), size: 12, color: t.ink, weight: .medium, mono: true)
     let dotColor = running ? t.accent : t.green
     fill(NSRect(x: consoleRect.maxX - 92, y: chY + 9, width: 7, height: 7), dotColor, radius: 3.5)
     text(running ? "Running" : "Succeeded", NSPoint(x: consoleRect.maxX - 78, y: chY + 5), size: 11, color: t.ink, weight: .medium)
@@ -395,21 +395,26 @@ func renderDashboard(width: CGFloat, height: CGFloat, theme t: Theme, tab: Tab,
     text("Copy", NSPoint(x: pad + 28, y: consoleRect.minY + 9), size: 11, color: t.muted)
     symbol("trash", NSRect(x: pad + 66, y: consoleRect.minY + 9, width: 12, height: 12), color: t.muted)
     text("Clear", NSPoint(x: pad + 82, y: consoleRect.minY + 9), size: 11, color: t.muted)
-    text("Follow", NSPoint(x: pad + 122, y: consoleRect.minY + 9), size: 11, color: t.muted)
+    // Follow: a checked amber checkbox + label (the app shows Follow enabled by default).
+    let cbSide: CGFloat = 13
+    let cbRect = NSRect(x: pad + 120, y: consoleRect.minY + 8, width: cbSide, height: cbSide)
+    fill(cbRect, t.accent, radius: 3)
+    symbol("checkmark", NSRect(x: cbRect.minX + 2.5, y: cbRect.minY + 3, width: cbSide - 5, height: cbSide - 6), color: .white, weight: .bold)
+    text("Follow", NSPoint(x: cbRect.maxX + 6, y: consoleRect.minY + 9), size: 11, color: t.ink)
     let stopR = NSRect(x: consoleRect.maxX - 66, y: consoleRect.minY + 6, width: 56, height: 18)
     if running { fill(stopR, t.red, radius: 5); text("Stop", NSPoint(x: stopR.minX + 16, y: stopR.midY - 7), size: 11, color: .white, weight: .medium) }
     else { strokeRect(stopR, t.line, radius: 5); text("Stop", NSPoint(x: stopR.minX + 16, y: stopR.midY - 7), size: 11, color: t.muted) }
 
-    // Footer — two lines, matching the app.
-    // Top line: run status (left) + license/copyright (right).
-    let statusLeft = running ? "Started 10:24 AM · Running" : "Started 10:24 AM · Exit 0 · 1s"
-    text(statusLeft, NSPoint(x: pad, y: pad + 10), size: 10, color: t.muted)
-    let license = "MIT License · © 2026 Ahmad Farid Abbas"
-    text(license, NSPoint(x: width - pad - measure(license, 10), y: pad + 10), size: 10, color: t.muted)
-    // Bottom line: brew path (left) + tagline (right).
-    text("/opt/homebrew/bin/brew", NSPoint(x: pad, y: pad - 6), size: 10, color: t.muted, mono: true)
+    // Footer — two lines, matching the app's order.
+    // Top line: brew path (left) + tagline (right).
+    text("/opt/homebrew/bin/brew", NSPoint(x: pad, y: pad + 10), size: 10, color: t.muted, mono: true)
     let ftr = "One command at a time"
-    text(ftr, NSPoint(x: width - pad - measure(ftr, 10), y: pad - 6), size: 10, color: t.muted)
+    text(ftr, NSPoint(x: width - pad - measure(ftr, 10), y: pad + 10), size: 10, color: t.muted)
+    // Bottom line: run status (left) + license/copyright (right).
+    let statusLeft = running ? "Started 10:24 AM · Running" : "Started 10:24 AM · Exit 0 · 1s"
+    text(statusLeft, NSPoint(x: pad, y: pad - 6), size: 10, color: t.muted)
+    let license = "MIT License · © 2026 Ahmad Farid Abbas"
+    text(license, NSPoint(x: width - pad - measure(license, 10), y: pad - 6), size: 10, color: t.muted)
 
     NSGraphicsContext.restoreGraphicsState()
     return bmp
