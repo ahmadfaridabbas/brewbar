@@ -54,6 +54,34 @@ struct DownloadProgress: Equatable {
     }
 }
 
+/// One row in the console's pinned live-download block. Homebrew's parallel download queue reports
+/// several packages at once (`⣷ Cask <name> (<ver>) ####  Downloading X/Y`); BrewBar keys an entry
+/// per package name and rebuilds the block from these entries each flush, so the block can never
+/// stack/garble and each row always pairs the right name with the right bytes. Entries stay in the
+/// block (marked `done` at 100%) until every download finishes, then the block commits to the log.
+struct DownloadEntry: Identifiable, Equatable {
+    let name: String
+    var receivedBytes: Int64
+    var totalBytes: Int64
+    var done: Bool
+    /// Used by the percentage-only path (`####  NN.N%`) when brew reports no byte totals. When set,
+    /// it drives `fraction` and the summary shows a bare percent instead of `X / Y`.
+    var fractionOverride: Double?
+    var id: String { name }
+
+    var fraction: Double {
+        if let f = fractionOverride { return min(max(f, 0), 1) }
+        guard totalBytes > 0 else { return done ? 1 : 0 }
+        return min(max(Double(receivedBytes) / Double(totalBytes), 0), 1)
+    }
+    /// e.g. `66.5 MB / 682.6 MB`, or just the percent when byte totals are unknown.
+    var byteSummary: String {
+        if fractionOverride != nil && totalBytes == 0 { return percentText }
+        return "\(DownloadProgress.format(receivedBytes)) / \(DownloadProgress.format(totalBytes))"
+    }
+    var percentText: String { "\(Int((fraction * 100).rounded()))%" }
+}
+
 /// Pure parser that turns a single console line into a progress update. Kept free of AppKit and of
 /// BrewModel state so it is trivially unit-testable. The model calls `parse(line:)` for every line
 /// it appends and applies the returned action.
@@ -66,8 +94,10 @@ enum DownloadProgressParser {
         /// The active download advanced to a known byte position (brew's own counter, e.g.
         /// `Downloading 263.1MB/373.1MB`). Carries exact received/total bytes so the bar shows
         /// brew's real numbers without a HEAD request. `name` is the cask/file when the status line
-        /// includes it (`Cask readdle-spark (…) … Downloading …`), else nil.
-        case bytes(received: Int64, total: Int64, name: String?)
+        /// includes it (`Cask readdle-spark (…) … Downloading …`), else nil. `complete` is true when
+        /// brew reports the file fully received (`received >= total`) — for the parallel queue this
+        /// marks that one entry done without ending the whole block.
+        case bytes(received: Int64, total: Int64, name: String?, complete: Bool)
         /// The active download finished (file written) or the command moved to a non-download step;
         /// the model should hide the bar.
         case finish
@@ -127,7 +157,12 @@ enum DownloadProgressParser {
                 let n = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
                 if !n.isEmpty { name = n }
             }
-            return received >= total ? .finish : .bytes(received: received, total: total, name: name)
+            let complete = received >= total
+            // A named parallel-queue entry that just completed stays reported (marked complete) so
+            // the block can keep it at 100% until every entry finishes. An unnamed single-download
+            // counter that hits 100% ends the bar as before.
+            if complete && name == nil { return .finish }
+            return .bytes(received: received, total: total, name: name, complete: complete)
         }
 
         // The percentage bar. `100%`/`100.0%` also ends the bar.

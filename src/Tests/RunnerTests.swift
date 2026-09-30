@@ -150,17 +150,24 @@ import Darwin
         precondition(DownloadProgress.format(2048) == "2.0 KB")
 
         // brew's parallel-queue byte counter drives the bar with exact numbers (no HEAD needed).
-        guard case .bytes(let rcv, let tot, let bname) =
+        guard case .bytes(let rcv, let tot, let bname, let bdone) =
             parse("⠿ Cask readdle-spark (3.31.3.141073) ##########   Downloading 263.1MB/373.1MB")
         else { preconditionFailure("byte counter should yield .bytes") }
         precondition(bname == "readdle-spark", "Bad cask name: \(String(describing: bname))")
         precondition(rcv == Int64((263.1 * 1024 * 1024).rounded()))
         precondition(tot == Int64((373.1 * 1024 * 1024).rounded()))
-        // `Downloaded X/X` (received == total) means finished.
-        precondition(parse("✓ Cask readdle-spark (3.31.3.141073)          Downloaded 373.1MB/373.1MB") == .finish)
-        // A byte counter without a Cask/Formula prefix still parses (name nil).
-        guard case .bytes(_, _, let noName) = parse("Downloading 1.5GB/4.0GB") else { preconditionFailure("bytes w/o name") }
+        precondition(bdone == false, "in-progress byte counter should not be complete")
+        // A NAMED `Downloaded X/X` (received == total) stays a .bytes marked complete, so the parallel
+        // block can keep that row at 100% until every download finishes (option b).
+        guard case .bytes(_, _, let dname, let ddone) =
+            parse("✓ Cask readdle-spark (3.31.3.141073)          Downloaded 373.1MB/373.1MB")
+        else { preconditionFailure("named completed counter should yield .bytes(complete)") }
+        precondition(dname == "readdle-spark" && ddone == true, "named completion should be complete")
+        // A byte counter WITHOUT a Cask/Formula prefix still parses (name nil).
+        guard case .bytes(_, _, let noName, _) = parse("Downloading 1.5GB/4.0GB") else { preconditionFailure("bytes w/o name") }
         precondition(noName == nil)
+        // An UNNAMED completed counter ends the (single-download) bar.
+        precondition(parse("Downloaded 4.0GB/4.0GB") == .finish)
         // applyExactBytes sets authoritative bytes + fraction, overriding any estimate.
         var ex = DownloadProgress(fileName: "spark.pkg", fraction: 0.2, totalBytes: 999)
         ex.applyExactBytes(received: 263_100_000, total: 373_100_000)

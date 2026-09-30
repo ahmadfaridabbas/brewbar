@@ -189,6 +189,18 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.25: Parallel-download console block
+
+Fixes the garbled console text and mismatched progress bar seen when Homebrew downloads multiple casks at once (its default parallel download queue).
+
+**The problem.** With several downloads running concurrently, brew redraws a multi-line status block each frame. The console only translated the horizontal cursor move (`ESC[0G` → carriage return) and stripped the vertical moves, so each repaint was appended rather than overwriting — producing stacked, interleaved lines like `Cask homebrew-app … Downloading 2.9MB/5.2MB⣿ Bottle gh … Downloading`. Separately, the progress bar was a single slot, so with multiple downloads it showed one package's name paired with another's byte counts (e.g. "chatgpt · 2.9 MB of 5.2 MB" when chatgpt is 682 MB).
+
+**The fix — structured, keyed download tracking.** Instead of emulating a terminal, BrewBar now parses each parallel-queue line into a keyed `DownloadEntry` (name → received/total bytes) and rebuilds the block from its own state. `BrewModel.downloads` is an insertion-ordered collection; `detectDownload` upserts entries by package name, so every row always pairs the right name with the right bytes — no stacking, no mismatch. A completed entry is marked done (kept at 100%) and the whole block stays until **every** download finishes, then commits a text snapshot into the log and clears so the install phase continues normally.
+
+**The UI — pinned live block.** The old single `DownloadProgressBar` is replaced by `LiveDownloads`, rendered *outside* the scrolling console (between it and the toolbar). It shows a header (`Downloading N items` · `x/N done`) and one row per package: a green check when done, the name, an inline mini progress bar (green at 100%), and brew's byte counter. Because it's pinned outside the scroll area, download progress stays visible regardless of the Follow toggle, and it scales to any concurrency. The HEAD size-lookup request was removed (brew's own byte counts are authoritative). Copy now includes a snapshot of the live block.
+
+Optimized arm64 build verified; the built bundle reports version 1.25 (build 27). All 18 test suites pass, including the extended download-progress parser tests (named completion stays a `.bytes(complete:)` marker so the block can hold a finished row at 100%).
+
 ## Version 1.24: Console performance & scroll-blanking fix
 
 Two fixes to the live command console, which could go blank while scrolling and made the menu-bar UI feel stuck during downloads.

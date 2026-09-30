@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.24"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.25"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -251,8 +251,8 @@ struct Dashboard: View {
                 ConsoleOutput(output: model.output, follow: model.follow, theme: theme)
                     .frame(height: 140)
                 Divider()
-                if let progress = model.download {
-                    DownloadProgressBar(progress: progress, theme: theme)
+                if !model.downloads.isEmpty {
+                    LiveDownloads(downloads: model.downloads, theme: theme)
                     Divider()
                 }
                 if model.awaitingInput {
@@ -320,7 +320,7 @@ struct Dashboard: View {
                     Divider()
                 }
                 HStack(spacing: 12) {
-                    Button { model.copy() } label: { Label("Copy", systemImage: "doc.on.doc") }.disabled(model.output.isEmpty).help("Copy visible output")
+                    Button { model.copy() } label: { Label("Copy", systemImage: "doc.on.doc") }.disabled(model.output.isEmpty && model.downloads.isEmpty).help("Copy visible output")
                     Button { model.clear() } label: { Label("Clear", systemImage: "trash") }.disabled(model.output.isEmpty)
                     Toggle("Follow", isOn: $model.follow).toggleStyle(.checkbox).help("Scroll to new output automatically")
                     Spacer()
@@ -480,37 +480,61 @@ struct ConsoleOutput: NSViewRepresentable {
     }
 }
 
-/// A persistent download progress bar for the console. Shown only while a file is downloading, it
-/// stays visible (tracking brew's live percentage and, when known, the total/downloaded bytes)
-/// until the download finishes — at which point the model clears `download` and the bar disappears.
-struct DownloadProgressBar: View {
-    let progress: DownloadProgress
+/// The console's pinned live-download block (Option A: rendered outside the scrolling console so it
+/// stays visible regardless of the Follow toggle). Homebrew's parallel download queue reports several
+/// packages at once; this shows one row per package — spinner/✓, name, an inline mini progress bar,
+/// percent, and brew's byte counter — rebuilt from the model's keyed `downloads`. Completed rows show
+/// a green check at 100% and stay until every download finishes (then the model commits the block to
+/// the log and it disappears). No name/bytes mismatch is possible because each row is its own entry.
+struct LiveDownloads: View {
+    let downloads: [DownloadEntry]
     let theme: Theme
+
+    private var doneCount: Int { downloads.filter { $0.done }.count }
+    private var title: String {
+        let n = downloads.count
+        return n == 1 ? "Downloading 1 item" : "Downloading \(n) items"
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.down.circle.fill").foregroundStyle(theme.accent)
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle.fill").foregroundStyle(theme.accent)
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(theme.text)
+                Spacer(minLength: 8)
+                Text("\(doneCount)/\(downloads.count) done")
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(theme.secondaryText)
+                    .monospacedDigit()
+            }
+            ForEach(downloads) { entry in
                 HStack(spacing: 8) {
-                    Text(progress.fileName)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    Image(systemName: entry.done ? "checkmark.circle.fill" : "arrow.down.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(entry.done ? Color.green : theme.accent)
+                        .frame(width: 14)
+                    Text(entry.name)
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.text)
                         .lineLimit(1).truncationMode(.middle)
-                        .help(progress.fileName)
-                    Spacer(minLength: 8)
-                    Text(progress.summary)
-                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 150, alignment: .leading)
+                        .help(entry.name)
+                    ProgressView(value: entry.fraction)
+                        .progressViewStyle(.linear)
+                        .tint(entry.done ? Color.green : theme.accent)
+                        .frame(maxWidth: .infinity)
+                    Text(entry.byteSummary)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(theme.secondaryText)
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .frame(width: 130, alignment: .trailing)
                 }
-                ProgressView(value: progress.fraction)
-                    .progressViewStyle(.linear)
-                    .tint(theme.accent)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(entry.name). \(entry.done ? "Downloaded" : "Downloading"). \(entry.byteSummary).")
             }
         }
         .padding(10)
         .background(theme.accent.opacity(0.08))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Downloading \(progress.fileName). \(progress.summary).")
-        .accessibilityValue(progress.summary)
+        .accessibilityElement(children: .contain)
     }
 }

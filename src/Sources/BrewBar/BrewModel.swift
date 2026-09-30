@@ -93,10 +93,19 @@ struct BrewAction: Identifiable {
     @Published var awaitingInput = false
     /// The prompt line brew printed (shown next to the Yes/No buttons).
     @Published var promptText = ""
-    /// Live download progress for the console's progress bar. Non-nil only while a file is being
-    /// downloaded; set from parsing brew's `==> Downloading …` / `#### NN.N%` output and cleared
-    /// when the download finishes (or the command moves on / ends).
-    @Published var download: DownloadProgress?
+    /// Live download progress for the console's pinned block. Homebrew's parallel download queue
+    /// reports several packages at once, so this is a collection keyed by package name (insertion-
+    /// ordered) rather than a single slot — each entry pairs the right name with the right bytes,
+    /// so the block can't show a mismatched name/bytes. Populated from parsing brew's parallel-queue
+    /// `Downloading X/Y` lines; entries stay (marked done at 100%) until every download finishes,
+    /// then the whole block commits to the log and clears. Empty when nothing is downloading.
+    @Published private(set) var downloads: [DownloadEntry] = []
+    /// Insertion order for `downloads` so the pinned block keeps a stable row order.
+    private var downloadOrder: [String] = []
+    /// A single-download fallback (the percentage-only bar path: `==> Downloading <url>` then
+    /// `####  NN.N%`), used when brew isn't reporting named byte counters. Rendered as one entry in
+    /// the same block. Nil when the parallel byte-counter path is driving the block.
+    private var singleDownloadName: String?
     /// A recoverable failure BrewBar can offer to fix with one click (currently: a resumable-download
     /// dead-end where a stale partial file in brew's cache can't be resumed). Set when a command
     /// fails with the matching signature; cleared when a new command runs, on Stop, or on Clear.
@@ -104,8 +113,6 @@ struct BrewAction: Identifiable {
     /// The arguments of the most recent user-run maintenance command, kept so the recovery flow can
     /// re-run the exact same command after clearing the stale download cache.
     private var lastArguments: [String] = []
-    /// Identifies the in-flight size lookup so a stale HEAD response can't populate a later download.
-    private var downloadSizeToken = UUID()
     private var environment = ProcessInfo.processInfo.environment
     private var runner: CommandRunner?
     private var activity: NSObjectProtocol?
@@ -505,64 +512,77 @@ struct BrewAction: Identifiable {
     /// Dismiss the recovery offer without acting (the user will handle it themselves).
     func dismissRecovery() { recovery = nil }
 
-    /// Parse the just-flushed `text` line-by-line for brew's download markers and update the
-    /// progress bar. The bar carries only a percentage; the total size is resolved asynchronously
-    /// from the download URL so the console can show "X MB of Y MB". Progress bar lines are rewritten
-    /// in place via carriage returns, so each flush may contain several `\r`-separated bar frames —
-    /// we split on both newlines and carriage returns to catch the latest frame.
+    /// Parse the just-flushed `text` line-by-line for brew's download markers and update the pinned
+    /// live-download block (`downloads`). Homebrew's parallel queue reports several packages at once,
+    /// so we key an entry per package name and rebuild the block from these entries — each row always
+    /// pairs the right name with the right bytes (no mismatch), and the block can't stack/garble
+    /// because we own it. A single unnamed download (percentage-only bar) is tracked as one entry.
+    /// Progress lines arrive `\r`-separated within a flush, so we split on both newlines and CRs.
     private func detectDownload(in text: String) {
         guard busy, !stopping else { return }
         for raw in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
             switch DownloadProgressParser.parse(line: String(raw)) {
             case .start(let url, let fileName):
-                download = DownloadProgress(fileName: fileName, fraction: 0, totalBytes: nil)
-                resolveDownloadSize(url: url)
+                // Percentage-only path: a single named download with no byte totals yet.
+                _ = url
+                singleDownloadName = fileName
+                upsert(name: fileName, received: 0, total: 0, fractionOverride: 0, done: false)
             case .progress(let fraction):
-                // Only advance a live bar; ignore stray percentages before a Downloading line.
-                if download != nil { download?.fraction = fraction }
-            case .bytes(let received, let total, let name):
-                // brew reported its own byte counter (parallel queue). Use it verbatim; it can also
-                // arrive without a preceding `==> Downloading` line, so start a bar if needed. No
-                // HEAD estimate is needed once we have brew's real numbers.
-                if download == nil {
-                    download = DownloadProgress(fileName: name ?? "Downloading…", fraction: 0, totalBytes: nil)
-                } else if let name, download?.fileName == "Downloading…" {
-                    download?.fileName = name
+                // Advance the single-download entry's percentage (ignored if no download started).
+                if let name = singleDownloadName {
+                    upsert(name: name, received: 0, total: 0, fractionOverride: fraction, done: false)
                 }
-                downloadSizeToken = UUID()  // cancel any pending HEAD; brew's numbers win
-                download?.applyExactBytes(received: received, total: total)
+            case .bytes(let received, let total, let name, let complete):
+                // brew's parallel-queue byte counter — authoritative. Key by the reported name; when
+                // brew omits a name (rare), fall back to the single-download slot.
+                let key = name ?? singleDownloadName ?? "Downloading…"
+                if name != nil { singleDownloadName = nil }  // real parallel data supersedes the bar
+                upsert(name: key, received: received, total: total, fractionOverride: nil, done: complete)
+                // Option (b): if every tracked entry is now complete, commit the block to the log.
+                if !downloads.isEmpty && downloads.allSatisfy({ $0.done }) { commitDownloads() }
             case .finish:
-                clearDownload()
+                // A non-download step (Installing/Pouring/…) or a completed single download: commit
+                // and clear the whole block so it doesn't linger into the install phase.
+                commitDownloads()
             case .none:
                 break
             }
         }
     }
 
-    /// Cancel any pending size lookup and hide the progress bar.
-    private func clearDownload() {
-        downloadSizeToken = UUID()
-        if download != nil { download = nil }
+    /// Insert or update a keyed download entry, preserving insertion order for the pinned block.
+    private func upsert(name: String, received: Int64, total: Int64, fractionOverride: Double?, done: Bool) {
+        if let idx = downloads.firstIndex(where: { $0.name == name }) {
+            var entry = downloads[idx]
+            if total > 0 { entry.receivedBytes = received; entry.totalBytes = total; entry.fractionOverride = nil }
+            else if let f = fractionOverride { entry.fractionOverride = f }
+            if done { entry.done = true }
+            downloads[idx] = entry
+        } else {
+            downloadOrder.append(name)
+            downloads.append(DownloadEntry(name: name, receivedBytes: received, totalBytes: total,
+                                           done: done, fractionOverride: total > 0 ? nil : fractionOverride))
+        }
     }
 
-    /// Resolve the total download size with a lightweight HEAD request so the bar can report bytes.
-    /// Best-effort: on any failure the bar simply shows the percentage. A per-request token guards
-    /// against a slow response landing on a different (later) download.
-    private func resolveDownloadSize(url urlString: String) {
-        guard let url = URL(string: urlString) else { return }
-        let token = UUID(); downloadSizeToken = token
-        var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
-        request.timeoutInterval = 10
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
-            let length = (response as? HTTPURLResponse)?.expectedContentLength
-                ?? response?.expectedContentLength ?? -1
-            guard length > 0 else { return }
-            Task { @MainActor in
-                guard let self = self, self.downloadSizeToken == token, self.download != nil else { return }
-                self.download?.totalBytes = length
-            }
-        }.resume()
+    /// Finalize the live block: fold a text snapshot of the completed downloads into the scrollback
+    /// log (so Copy and history keep a record), then clear the pinned block.
+    private func commitDownloads() {
+        guard !downloads.isEmpty else { clearDownload(); return }
+        var snapshot = ""
+        for entry in downloads {
+            let mark = entry.done ? "✓" : "·"
+            snapshot += "  \(mark) \(entry.name) — \(entry.byteSummary)\n"
+        }
+        append(snapshot)
+        clearDownload()
+    }
+
+    /// Clear the pinned live-download block (no snapshot). Used on stop/clear/command-end.
+    private func clearDownload() {
+        singleDownloadName = nil
+        downloadOrder.removeAll()
+        if !downloads.isEmpty { downloads = [] }
     }
     /// Appends `text` to `output`, treating a bare carriage return as "move to the start of the
     /// current line and overwrite it". This keeps live progress bars on one line and leaves the
@@ -771,5 +791,16 @@ struct BrewAction: Identifiable {
 
     func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); recovery = nil; status = "Stopping…"; runner?.cancel() }
     func clear() { output = ""; pending.removeAll(); truncated = false; clearDownload(); recovery = nil }
-    func copy() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+    func copy() {
+        var text = output
+        if !downloads.isEmpty {
+            var snapshot = "\nDownloads:\n"
+            for entry in downloads {
+                let mark = entry.done ? "✓" : "·"
+                snapshot += "  \(mark) \(entry.name) — \(entry.byteSummary)\n"
+            }
+            text += snapshot
+        }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+    }
 }
