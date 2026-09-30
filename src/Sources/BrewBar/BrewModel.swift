@@ -721,7 +721,10 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.26"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.26.1"
+        // On a manual check, print the running build's details to the console so there's a visible
+        // record of what's installed alongside the check result.
+        if manual { logAppUpdateHeader(current: current) }
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             Task { @MainActor in
                 guard let self = self else { return }
@@ -730,18 +733,27 @@ struct BrewAction: Identifiable {
                 guard let data = data, error == nil,
                       (response as? HTTPURLResponse)?.statusCode == 200,
                       let tag = AppUpdate.tagName(fromLatestReleaseJSON: data) else {
-                    if manual { self.appUpdateStatus = "Couldn't check for updates. Try again later." }
+                    if manual {
+                        self.appUpdateStatus = "Couldn't check for updates. Try again later."
+                        self.logAppUpdate("Could not reach GitHub Releases. Check your connection and try again.")
+                    }
                     return
                 }
                 let latest = AppUpdate.displayVersion(fromTag: tag)
                 if AppUpdate.isNewer(tag, than: current) {
                     self.appUpdateAvailable = true
                     self.latestAppVersion = latest
-                    if manual { self.appUpdateStatus = "BrewBar \(latest) is available." }
+                    if manual {
+                        self.appUpdateStatus = "BrewBar \(latest) is available."
+                        self.logAppUpdate("Update available: BrewBar \(latest) (latest release \(tag)). Open the download page from Options or the header banner.")
+                    }
                 } else {
                     self.appUpdateAvailable = false
                     self.latestAppVersion = nil
-                    if manual { self.appUpdateStatus = "You're up to date." }
+                    if manual {
+                        self.appUpdateStatus = "You're up to date."
+                        self.logAppUpdate("You're up to date — BrewBar \(current) is the latest release.")
+                    }
                 }
             }
         }
@@ -753,6 +765,31 @@ struct BrewAction: Identifiable {
     /// download, not an in-place self-replace).
     func openAppReleasePage() {
         NSWorkspace.shared.open(AppUpdate.latestReleasePage)
+    }
+
+    /// Print the running build's details to the console when the user manually checks for updates,
+    /// so there's a visible record of exactly what's installed. Skipped while a foreground command
+    /// is running so it never interleaves with live command output (the menu still shows status).
+    private func logAppUpdateHeader(current: String) {
+        guard !busy else { return }
+        let info = Bundle.main.infoDictionary
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        let identifier = info?["CFBundleIdentifier"] as? String ?? "com.brewbar.app"
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        let bundlePath = Bundle.main.bundlePath
+        let stamp = Date().formatted(date: .omitted, time: .standard)
+        var text = "[\(stamp)] Checking for BrewBar updates…\n"
+        text += "  Current version: \(current) (build \(build))\n"
+        text += "  Bundle ID:       \(identifier)\n"
+        text += "  Location:        \(bundlePath)\n"
+        text += "  macOS:           \(os)\n"
+        append(text)
+    }
+
+    /// Print a single update-check result line to the console (guarded like the header).
+    private func logAppUpdate(_ message: String) {
+        guard !busy else { return }
+        append("  \(message)\n")
     }
 
     /// The exact `brew bundle dump` arguments for exporting a Brewfile to `path`. Kept as a pure

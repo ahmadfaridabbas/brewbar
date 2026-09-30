@@ -189,6 +189,23 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.26.1: Build details in the console on update check
+
+A small follow-up to 1.26. When you choose **Options → Check for Updates…**, BrewBar now prints the running build's details to the console before reporting the result — a visible record of exactly what's installed:
+
+```
+[time] Checking for BrewBar updates…
+  Current version: 1.26.1 (build 29)
+  Bundle ID:       com.brewbar.app
+  Location:        /Applications/BrewBar.app
+  macOS:           Version 14.x …
+  You're up to date — BrewBar 1.26.1 is the latest release.
+```
+
+The result line reflects the outcome (up to date / an available version with its tag / a connection error). Logging is skipped while a Homebrew command is running so it never interleaves with live command output (the menu still shows the status either way).
+
+Optimized arm64 build verified; the built bundle reports version 1.26.1 (build 29). All 19 test suites pass.
+
 ## Version 1.26: In-app update check + Quit cleanup
 
 **Check for Updates (Phase 1).** BrewBar now notices when a newer version has been released. A lightweight background check (shortly after launch, then every 6 hours) queries the GitHub Releases API for the latest tag and compares it to the running version. When a newer release exists it's surfaced in two places: an **Options → Check for Updates…** item (which becomes **Download Update — X…**), and a small tappable **"Update available — X"** pill under the version text in the header. Clicking either opens the GitHub release page to download the new build. This is the detect-and-guide phase — it does not replace the app in place (a one-click self-update is a planned follow-up). The check is fail-safe (any network/parse error simply leaves the state as "no update", never a false nag) and never blocks the UI. The version comparison is a pure, unit-tested helper (`AppUpdate.isNewer`) that tolerates `v`-prefixed tags and pre-release suffixes.
