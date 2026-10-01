@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.28.3"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.28.4"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -483,7 +483,7 @@ struct ConsoleOutput: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         let color = isEmpty ? NSColor(theme.secondaryText) : NSColor(theme.text)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 4
+        paragraph.lineSpacing = 2
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,

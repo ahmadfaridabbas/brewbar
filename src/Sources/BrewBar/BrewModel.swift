@@ -771,7 +771,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.3"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.4"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }
@@ -1007,14 +1007,19 @@ struct BrewAction: Identifiable {
         let os = ProcessInfo.processInfo.operatingSystemVersionString
         let bundlePath = Bundle.main.bundlePath
         let stamp = Date().formatted(date: .omitted, time: .standard)
-        var text = "[\(stamp)] Checking for BrewBar updates…\n"
+        // Each line is prefixed with a carriage return so it resets to column 0 before the text is
+        // written. These lines are appended after a prior command's output whose trailing bare LF
+        // (correctly, per the v1.28 terminal fix) PRESERVES the column — without the leading CR the
+        // whole About block would inherit that stale column and cascade progressively to the right
+        // (each internal `\n` also preserves the column, so every row shifts further than the last).
+        var text = "\r[\(stamp)] Checking for BrewBar updates…\n"
         // Align the values in a fixed column by padding each label to the width of the longest one,
         // rather than hand-typed spaces (which previously left "Current version:" one column off
-        // from the others). `padLabel` right-pads to `labelWidth`, so every value starts at the same
-        // column regardless of label length.
+        // from the others). `row` right-pads the label to `labelWidth`, so every value starts at the
+        // same column regardless of label length.
         let labelWidth = 16  // length of the longest label ("Current version:")
         func row(_ label: String, _ value: String) -> String {
-            "  " + label.padding(toLength: labelWidth, withPad: " ", startingAt: 0) + " \(value)\n"
+            "\r  " + label.padding(toLength: labelWidth, withPad: " ", startingAt: 0) + " \(value)\n"
         }
         text += row("Current version:", "\(current) (build \(build))")
         text += row("Bundle ID:", identifier)
@@ -1023,10 +1028,12 @@ struct BrewAction: Identifiable {
         append(text)
     }
 
-    /// Print a single update-check result line to the console (guarded like the header).
+    /// Print a single update-check result line to the console (guarded like the header). Prefixed
+    /// with a carriage return for the same reason as the header: the preceding line's bare LF leaves
+    /// the cursor at a stale column, so reset to column 0 before writing.
     private func logAppUpdate(_ message: String) {
         guard !busy else { return }
-        append("  \(message)\n")
+        append("\r  \(message)\n")
     }
 
     /// The exact `brew bundle dump` arguments for exporting a Brewfile to `path`. Kept as a pure

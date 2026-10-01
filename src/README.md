@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.28.4: About-check console block no longer cascades; tighter line spacing
+
+A follow-up to 1.28.3. The manual update-check prints an About block to the console — `[time] Checking for BrewBar updates…`, then `Current version:` / `Bundle ID:` / `Location:` / `macOS:` / the result line. 1.28.3 aligned the labels *within* the block, but the block as a whole still began at the stale cursor column left by the previous command's output, and because every internal line feed preserves the column (correct per the 1.28 terminal model), each line cascaded progressively further to the right.
+
+**Fix.** Every line emitted by `logAppUpdateHeader` (the first line and each padded row) and by `logAppUpdate` (the result line) is now prefixed with a carriage return (`\r…`), resetting the column to 0 before the text is written — so the whole block starts at the left margin regardless of where the previous command left the cursor. Added a regression test driving `checkForAppUpdate(manual:)` after a finished command and asserting the header line, each labelled row, and the macOS row all start at column 0; reverting the header `\r` reproduces the exact cascade symptom.
+
+**Also:** reduced the console's text `lineSpacing` from 4 to 2 for a tighter, less loosely-spaced log, as requested.
+
+Optimized arm64 build verified; the built bundle reports version 1.28.4 (build 36). All 25 test suites pass.
+
 ## Version 1.28.3: Non-PTY console lines and About-info columns no longer indented
 
 A follow-up to the 1.28.x terminal-fidelity line, fixing two remaining alignment bugs reported from console screenshots.

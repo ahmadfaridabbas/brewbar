@@ -399,6 +399,33 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         model.brewPath = fixture.path
         print("PASS: non-PTY flush path keeps brew's stderr `==>` preamble at column 0")
 
+        // About-header cascade (regression for v1.28.4): the manual update-check prints a multi-line
+        // About block (`[time] Checking for BrewBar updates…`, then Current version / Bundle ID /
+        // Location / macOS) via logAppUpdateHeader. It is appended AFTER a prior command's output
+        // whose trailing bare LF preserves the column, and every internal `\n` also preserves it —
+        // so without a leading CR on each line the whole block cascaded progressively to the right.
+        // checkForAppUpdate(manual:) prints the header synchronously (before the async network task),
+        // so we can assert on model.output immediately. Seed a prior finished command first so the
+        // emulator cursor is parked at a stale (non-zero) column.
+        model.brewPath = fixture.path
+        model.checkUpdates()                 // leaves a summary line + status, cursor parked mid-line
+        pump { !model.busy && !model.checkingUpdates }
+        model.checkForAppUpdate(manual: true)
+        let aboutLines = model.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let checking = aboutLines.first { $0.contains("Checking for BrewBar updates") } ?? ""
+        let currentV = aboutLines.first { $0.contains("Current version:") } ?? ""
+        let bundleID = aboutLines.first { $0.contains("Bundle ID:") } ?? ""
+        let macOSLine = aboutLines.first { $0.contains("macOS:") } ?? ""
+        precondition(checking.hasPrefix("["),
+                     "About header line must start at col 0 (hasPrefix '['), got: '\(checking)'")
+        precondition(currentV.hasPrefix("  Current version:"),
+                     "Current version row must start at col 0 (two-space indent), got: '\(currentV)'")
+        precondition(bundleID.hasPrefix("  Bundle ID:"),
+                     "Bundle ID row must start at col 0, got: '\(bundleID)'")
+        precondition(macOSLine.hasPrefix("  macOS:"),
+                     "macOS row must start at col 0, got: '\(macOSLine)'")
+        print("PASS: About update-check header starts every line at column 0 (no cascade)")
+
         print("PASS: UninstallTests")
     }
     static func pump(_ done: () -> Bool) {
