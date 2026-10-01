@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.28: Faithful multi-download console (CRLF terminal fix)
+
+Fixes a console-rendering bug where real `brew` output — especially the parallel download queue and the `✔︎ Cask … (version)` completion lines — rendered with each line marching progressively to the right, so a multi-cask fetch looked garbled instead of matching Terminal.app.
+
+**Root cause.** BrewBar's `TerminalEmulator` iterated the output stream by Swift `Character` (extended grapheme clusters). Homebrew terminates each status line with a carriage-return + line-feed (`"\r\n"`), and Swift treats `"\r\n"` as a **single** `Character` (scalars `[13, 10]`). The emulator's loop saw that one combined grapheme, matched neither the bare-`\r` nor the bare-`\n` case, and handled it as a plain line feed — so the carriage return's **column reset was lost**, and every subsequent line was padded with the previous line's width.
+
+**Fix.** The emulator now iterates **Unicode scalars**, so `\r` (column 0) and `\n` (next row) are always distinct control codes, exactly as a real terminal processes a byte stream. Zero-width combining marks and variation selectors (e.g. the `U+FE0E` after brew's `✔` check mark) are folded onto the previous cell, so `✔︎` renders as one glyph without disturbing column math. Escape-sequence parsing (`consumeEscape`/`applyCSI`) was converted to scalars to match. Verified against two real captured `brew fetch --cask` streams (`alt-tab clipy cotypist` and `google-chrome firefox`): both render clean, with SGR colour codes stripped and no padding. A CRLF + SGR-check-mark regression test was added to `RunnerTests`, and the `UninstallTests` compile line in `test.sh` now includes `TerminalEmulator.swift` (which `BrewModel` depends on) — all 20 test suites pass.
+
+Optimized arm64 build verified; the built bundle reports version 1.28 (build 32).
+
 ## Version 1.27.1: Segmented-tab focus-ring fix
 
 Fixes a visual glitch where the selected tab in the **Maintenance / Installed / Updates** segmented control (and the **Installed / Search & Install** mode toggle) drew a stray blue macOS keyboard focus ring around the active segment. SwiftUI's `.focusable(false)` doesn't reliably suppress the ring that AppKit paints on the underlying `NSSegmentedControl`, so a small `NSViewRepresentable` (`SegmentedFocusRingSuppressor`, applied via a `.hideSegmentedFocusRing()` view modifier) now reaches the backing control and sets `focusRingType = .none`. Rendered as a zero-size background, so layout is unaffected. Build 31; all 19 test suites pass.

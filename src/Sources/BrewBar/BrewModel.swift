@@ -143,6 +143,11 @@ struct BrewAction: Identifiable {
     private var resolutionID = UUID()
     private var truncated = false
     private let limit = 500_000
+    /// Line-oriented terminal emulator that renders brew's live output (CR/cursor-up redraws, erase
+    /// line) exactly like a real terminal. All writes to `output` go through it so the console mirror
+    /// matches Terminal.app — in particular, the parallel download queue's multi-line in-place redraw
+    /// collapses onto one block instead of stacking/garbling. See TerminalEmulator for the details.
+    private var terminal = TerminalEmulator()
 
     init(prepareOnLaunch: Bool = true) { if prepareOnLaunch { prepare() } }
 
@@ -173,8 +178,8 @@ struct BrewAction: Identifiable {
             self.brewPath = resolved.0; self.environment = resolved.1
             self.busy = false; self.ready = resolved.0 != nil; self.runner = nil
             self.status = self.ready ? "Ready" : "Homebrew not found"
-            if code != 0 { self.output = "Login environment unavailable; using standard Homebrew paths.\n" }
-            if !self.ready { self.output += "Install Homebrew from brew.sh, then choose Retry.\n" }
+            if code != 0 { self.setOutput("Login environment unavailable; using standard Homebrew paths.\n") }
+            if !self.ready { self.append("Install Homebrew from brew.sh, then choose Retry.\n") }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak process] in
             if self?.resolutionID == id && self?.ready == false && self?.busy == true { process?.cancel() }
@@ -198,7 +203,7 @@ struct BrewAction: Identifiable {
         started = Date(); finished = nil; command = "brew " + arguments.joined(separator: " "); status = "Running"
         pending.removeAll(); truncated = false
         let heading = "[\(Date().formatted(date: .omitted, time: .standard))] $ \(command)\n"
-        if preserveOutput { append("\n" + heading) } else { output = heading }
+        if preserveOutput { append("\n" + heading) } else { terminal.reset(); setOutput(heading) }
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Homebrew maintenance")
         let process = CommandRunner(); runner = process
         outputTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -220,7 +225,9 @@ struct BrewAction: Identifiable {
             // Offer a one-click fix when the failure is a resumable-download dead-end (curl-56 /
             // "Cannot resume"). Only for a real (non-cancelled) failure of a retryable command.
             if self.failed, let hint = RecoveryHintDetector.detect(in: self.output) { self.recovery = hint }
-            while self.output.last == "\n" || self.output.last == "\r" { self.output.removeLast() }
+            var trimmed = self.output
+            while trimmed.last == "\n" || trimmed.last == "\r" { trimmed.removeLast() }
+            self.setOutput(trimmed)
             self.append("\n[\(Date().formatted(date: .omitted, time: .standard))] \(self.status) · Exit \(code)\n")
             if cancelled { self.append("Completed changes are not rolled back. Run Doctor to check Homebrew.\n") }
             self.runner = nil
@@ -442,20 +449,22 @@ struct BrewAction: Identifiable {
             }
         }
         guard count > 0 else { return }
-        var text = String(decoding: pending.prefix(count), as: UTF8.self)
+        let text = String(decoding: pending.prefix(count), as: UTF8.self)
         pending.removeFirst(count)
-        // Homebrew's parallel download queue redraws its status line each frame by moving the cursor
-        // to column 0 with a CHA sequence (`ESC[<n>G`, typically `ESC[0G`) rather than a bare CR.
-        // Translate that to a carriage return first so `append` rewrites the line in place (the same
-        // way it handles the single-download bar). Then strip the remaining ANSI control sequences
-        // (colours, cursor show/hide, synchronized-output `?2026h/l`, erase-line `[K`) and honour CRs
-        // so brew's progress bar updates one line instead of flooding the console.
-        text = text.replacingOccurrences(of: "\u{001B}\\[[0-9]*G", with: "\r", options: .regularExpression)
-        text = text.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: "\r\n", with: "\n")
+        // Feed brew's raw output (control sequences intact) to the terminal emulator via append; it
+        // honours CR, cursor-up (`ESC[nF`), erase-line (`ESC[K`) and the synchronized-update markers
+        // so the parallel download queue's multi-line redraw collapses onto one block, matching a
+        // real terminal. (Previously flush pre-translated `ESC[0G`→CR and stripped the rest, which
+        // discarded the cursor-up and let multi-item frames stack/garble.)
         append(text)
+        // The structured live-download block (DownloadProgressParser) wants clean, control-free
+        // lines. Strip ANSI and normalise CR/CUP to newlines for the parser's input only — the
+        // console mirror above keeps brew's exact in-place rendering.
+        var clean = text.replacingOccurrences(of: "\u{001B}\\[[0-9]*[GF]", with: "\n", options: .regularExpression)
+        clean = clean.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+        clean = clean.replacingOccurrences(of: "\r\n", with: "\n")
         detectPrompt()
-        detectDownload(in: text)
+        detectDownload(in: clean)
     }
 
     /// Recognise brew's interactive confirmation (`ohai "Do you want to proceed with the … ? [y/n]"`)
@@ -606,36 +615,23 @@ struct BrewAction: Identifiable {
         downloadOrder.removeAll()
         if !downloads.isEmpty { downloads = [] }
     }
-    /// Appends `text` to `output`, treating a bare carriage return as "move to the start of the
-    /// current line and overwrite it". This keeps live progress bars on one line and leaves the
-    /// stored `output` clean for the Console view and the Copy button.
-    ///
-    /// Processes the incoming text in bulk segments split on `\r` rather than character-by-character.
-    /// A carriage return can rewrite the current line many times per second during brew's parallel
-    /// download queue; the old per-character loop did an O(n) `removeSubrange` on every `\r`, which
-    /// starved the main thread as `output` grew. This version does at most one line-truncation per
-    /// `\r` and appends whole segments, so cost is proportional to the incoming delta.
+    /// Appends `text` to the console by feeding it to the terminal emulator, then publishes the
+    /// emulator's rendered screen as `output`. `text` may contain brew's raw control sequences
+    /// (carriage returns, cursor-up/`ESC[nF`, erase-line/`ESC[K`, synchronized-update markers); the
+    /// emulator honours them so progress bars rewrite in place and the parallel download queue's
+    /// multi-line redraw collapses onto one block exactly like a real terminal. Plain status/snapshot
+    /// text (no control codes) is handled identically — it just appends.
     private func append(_ text: String) {
         guard !text.isEmpty else { return }
-        // Split on carriage returns, keeping track so a trailing empty segment (text ended with \r)
-        // still erases the current line. `components(separatedBy:)` yields N+1 pieces for N returns.
-        let segments = text.components(separatedBy: "\r")
-        for (index, segment) in segments.enumerated() {
-            if index > 0 {
-                // A carriage return preceded this segment: erase back to the start of the current
-                // line (everything after the last newline).
-                if let newline = output.lastIndex(of: "\n") {
-                    output.removeSubrange(output.index(after: newline)..<output.endIndex)
-                } else {
-                    output.removeAll(keepingCapacity: true)
-                }
-            }
-            if !segment.isEmpty { output.append(segment) }
-        }
-        if output.utf8.count > limit {
-            output = "[Earlier output trimmed; showing recent output]\n" + String(output.suffix(limit / 2))
-            truncated = true
-        }
+        terminal.feed(text)
+        if terminal.trim(toUTF8: limit) { truncated = true }
+        output = terminal.render()
+    }
+    /// Replace the console contents outright (a command heading, an error line, or a clear). Keeps the
+    /// emulator's cursor consistent with the visible text so a following live redraw lands correctly.
+    private func setOutput(_ text: String) {
+        terminal.seed(text)
+        output = terminal.render()
     }
     /// Fetch rich detail for one package to show in its info popover (Feature 2). Uses a quiet JSON
     /// capture to a temp file (like `refreshInstalled`), so the console isn't spammed. Gated by the
@@ -732,7 +728,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.27.1"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }
@@ -1080,7 +1076,7 @@ struct BrewAction: Identifiable {
     func cancelRestoreBrewfile() { brewfileRestoreCandidate = nil }
 
     func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); recovery = nil; status = "Stopping…"; runner?.cancel() }
-    func clear() { output = ""; pending.removeAll(); truncated = false; clearDownload(); recovery = nil }
+    func clear() { terminal.reset(); output = ""; pending.removeAll(); truncated = false; clearDownload(); recovery = nil }
     func copy() {
         var text = output
         if !downloads.isEmpty {

@@ -177,6 +177,83 @@ import Darwin
         precondition(DownloadProgressParser.bytes(value: "2", unit: "GB") == Int64(2) * 1024 * 1024 * 1024)
         print("PASS: download progress parsing (start/advance/finish), file-name extraction, byte summary")
 
+        // TerminalEmulator: brew's live redraw must collapse onto one block, matching a real terminal.
+        // Control sequences used (verified against Homebrew download_queue.rb / utils/tty.rb):
+        //   ESC[0G  move to column 0        ESC[<n>F  cursor up n rows + column 0
+        //   ESC[K   erase to end of line    ESC[<n>B  cursor down n rows
+        //   ESC[?2026h / ESC[?2026l  synchronized-update begin/end (ignored)
+        let ESC = "\u{1B}"
+        // Single-line rewrite via CR: later text overwrites the start of the line.
+        var t1 = TerminalEmulator()
+        t1.feed("Downloading 10MB/100MB\rDownloading 20MB/100MB")
+        precondition(t1.render() == "Downloading 20MB/100MB", "CR should rewrite the line in place: \(t1.render())")
+        // Single-line rewrite via CHA (ESC[0G), as brew emits for a one-item queue.
+        var t2 = TerminalEmulator()
+        t2.feed("abc\(ESC)[0Gxy")
+        precondition(t2.render() == "xyc", "ESC[0G moves to col 0; 'xy' overwrites 'ab': \(t2.render())")
+        // ESC[K erases from the cursor to end of line (shorter redraw must not leave stale tail).
+        var t3 = TerminalEmulator()
+        t3.feed("Downloading 100MB\r999\(ESC)[K")
+        precondition(t3.render() == "999", "ESC[K must clear the stale tail: \(t3.render())")
+        // THE REGRESSION: a two-item parallel queue. Each frame prints 2 lines, each cleared with
+        // ESC[K, then moves the cursor UP 1 row to column 0 (ESC[1F) to redraw the same block.
+        // Wrapped in a DEC 2026 synchronized update. The second frame must OVERWRITE the first,
+        // not stack below it.
+        var q = TerminalEmulator()
+        func frame(_ a: String, _ b: String) -> String {
+            // print line A + clear, newline, line B + clear, then cursor up 1 to top-of-block.
+            "\(ESC)[?2026h\(a)\(ESC)[K\n\(b)\(ESC)[K\(ESC)[1F\(ESC)[?2026l"
+        }
+        q.feed(frame("Cask chatgpt (26.9) ##   Downloading 10MB/682MB",
+                     "Cask kiro-cli (2.26) #   Downloading 5MB/360MB"))
+        q.feed(frame("Cask chatgpt (26.9) #####  Downloading 173MB/682MB",
+                     "Cask kiro-cli (2.26) ####  Downloading 78MB/360MB"))
+        let qlines = q.render().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        precondition(qlines.count == 2, "two-item queue must stay 2 lines, got \(qlines.count): \(q.render())")
+        precondition(qlines[0].contains("chatgpt") && qlines[0].contains("173MB/682MB"),
+                     "row 0 must show chatgpt's latest bytes, not a collided line: \(qlines[0])")
+        precondition(qlines[1].contains("kiro-cli") && qlines[1].contains("78MB/360MB"),
+                     "row 1 must show kiro-cli's latest bytes: \(qlines[1])")
+        precondition(!q.render().contains("10MB/682MB") && !q.render().contains("5MB/360MB"),
+                     "stale first-frame numbers must be overwritten, not left behind: \(q.render())")
+        // Scrollback above the live block is preserved: a committed line then a redrawn block.
+        var sb = TerminalEmulator()
+        sb.feed("==> Fetching downloads for: chatgpt\n")
+        sb.feed(frame("Cask chatgpt (26.9) #   Downloading 1MB/682MB",
+                      "Cask kiro-cli (2.26) #  Downloading 1MB/360MB"))
+        sb.feed(frame("Cask chatgpt (26.9) ##  Downloading 2MB/682MB",
+                      "Cask kiro-cli (2.26) ## Downloading 2MB/360MB"))
+        precondition(sb.render().hasPrefix("==> Fetching downloads for: chatgpt\n"),
+                     "history above the block must be untouched: \(sb.render())")
+        precondition(sb.render().split(separator: "\n", omittingEmptySubsequences: false).count == 3,
+                     "one history line + two live rows = 3 lines: \(sb.render())")
+        // Stray DEC-private and SGR escapes leave no residue in the text.
+        var t4 = TerminalEmulator()
+        t4.feed("\(ESC)[?25l\(ESC)[32mgreen\(ESC)[0m\(ESC)[?25h")
+        precondition(t4.render() == "green", "colour + cursor-visibility escapes must be stripped: \(t4.render())")
+        // REAL-STREAM REGRESSION (the bug this emulator shipped to fix): brew terminates each status
+        // line with a CARRIAGE RETURN + LINE FEED ("\r\n"). Swift treats "\r\n" as a SINGLE Character
+        // grapheme (scalars [13,10]), so a Character-based loop handled it as a bare line feed and the
+        // carriage return's column reset was LOST — every subsequent line was padded with the previous
+        // line's width, marching progressively to the right. Scalar-based iteration keeps CR and LF
+        // distinct. Here three CRLF-separated lines must each start at column 0 (no leading padding).
+        var crlf = TerminalEmulator()
+        crlf.feed("Fetching: alt-tab, clipy, cotypist\r\n==> Fetching alt-tab from homebrew/cask\r\n==> Fetching clipy from homebrew/cask\r\n")
+        let crlfLines = crlf.render().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        precondition(crlfLines[0] == "Fetching: alt-tab, clipy, cotypist", "row 0: \(crlfLines[0])")
+        precondition(crlfLines[1] == "==> Fetching alt-tab from homebrew/cask",
+                     "CRLF row 1 must start at col 0, not be shifted right: '\(crlfLines[1])'")
+        precondition(crlfLines[2] == "==> Fetching clipy from homebrew/cask",
+                     "CRLF row 2 must start at col 0: '\(crlfLines[2])'")
+        // brew's completion line is an SGR-coloured check mark with a U+FE0E variation selector
+        // ("\(ESC)[32m✔\u{FE0E}\(ESC)[0m Cask …"), followed by CRLF then ESC[K on the next line. The
+        // colour codes strip away, the "✔︎" renders as ONE grapheme, and the line is not padded.
+        var checkLine = TerminalEmulator()
+        checkLine.feed("\(ESC)[32m✔\u{FE0E}\(ESC)[0m Cask clipy (1.3.0)\r\n\(ESC)[K")
+        precondition(checkLine.render().split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) == "✔\u{FE0E} Cask clipy (1.3.0)",
+                     "completion line must be clean (no SGR residue, no padding): '\(checkLine.render())'")
+        print("PASS: terminal emulator (CR/CHA rewrite, erase-line, multi-line parallel redraw, CRLF + SGR check mark, scrollback)")
+
         // AppUpdate (Phase 1): version parsing + strictly-newer comparison, tag normalization.
         precondition(AppUpdate.versionComponents("v1.26") == [1, 26])
         precondition(AppUpdate.versionComponents("1.26.1") == [1, 26, 1])
