@@ -228,8 +228,13 @@ struct BrewAction: Identifiable {
             var trimmed = self.output
             while trimmed.last == "\n" || trimmed.last == "\r" { trimmed.removeLast() }
             self.setOutput(trimmed)
-            self.append("\n[\(Date().formatted(date: .omitted, time: .standard))] \(self.status) · Exit \(code)\n")
-            if cancelled { self.append("Completed changes are not rolled back. Run Doctor to check Homebrew.\n") }
+            // Prefix the synthetic status line with CR+LF, not just LF: after `setOutput` re-seeds
+            // the emulator the cursor sits at the END of brew's last output line, and a bare LF
+            // preserves the column (correct terminal behaviour) — which would indent this status
+            // line to that stale column. The CR resets to column 0 so it always starts at the left
+            // margin. Same for the cancelled-rollback note below.
+            self.append("\r\n[\(Date().formatted(date: .omitted, time: .standard))] \(self.status) · Exit \(code)\n")
+            if cancelled { self.append("\rCompleted changes are not rolled back. Run Doctor to check Homebrew.\n") }
             self.runner = nil
             if let activity = self.activity { ProcessInfo.processInfo.endActivity(activity) }; self.activity = nil
             completion(code, cancelled)
@@ -728,7 +733,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.1"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }

@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.28.1: Console status line no longer indented
+
+A follow-up to 1.28. After a command finished, the synthetic status footer line (e.g. `[2:28 AM] Succeeded · Exit 0`) could appear indented far to the right instead of starting at the left margin — most visible after `brew outdated` when nothing is outdated.
+
+**Cause.** On completion, `BrewModel` trims trailing newlines from the console text and re-seeds the terminal emulator; `seed` leaves the cursor at the END of brew's last output line. The status line was then appended with a leading bare line feed (`\n`), and — correctly, per the terminal fix in 1.28 — a line feed preserves the column, so the status line started at brew's stale cursor column rather than at column 0.
+
+**Fix.** The status line (and the cancelled-rollback note) is now prefixed with a carriage return before the line feed (`\r\n` / `\r`), resetting the column to 0 so it always starts at the left margin regardless of where brew left the cursor. Added a regression test driving a fake brew whose output has no trailing newline and asserting the status line begins at column 0.
+
+Optimized arm64 build verified; the built bundle reports version 1.28.1 (build 33). All 21 test suites pass.
+
 ## Version 1.28: Faithful multi-download console (CRLF terminal fix)
 
 Fixes a console-rendering bug where real `brew` output — especially the parallel download queue and the `✔︎ Cask … (version)` completion lines — rendered with each line marching progressively to the right, so a multi-cask fetch looked garbled instead of matching Terminal.app.

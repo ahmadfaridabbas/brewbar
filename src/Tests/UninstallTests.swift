@@ -96,6 +96,28 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         print("PASS: all six maintenance buttons run only their named command; compact output")
         print("PASS: uninstall selection/cancel, launch, concurrency guard, success, failure retention, Stop")
 
+        // Status-line column reset: when brew's final output does NOT end in a newline (so the
+        // emulator's cursor is parked mid-line), the synthetic "[time] Succeeded · Exit 0" line must
+        // still start at column 0, not be indented to that stale column. (Regression for the console
+        // screenshot where "Succeeded · Exit 0" was pushed far to the right after `brew outdated`.)
+        let noNewline = folder.appendingPathComponent("no-newline-brew")
+        try """
+        #!/bin/sh
+        printf 'No changes to make.'
+        exit 0
+        """.write(to: noNewline, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: noNewline.path)
+        model.brewPath = noNewline.path
+        model.run(BrewAction(command: "outdated", title: "Outdated", detail: "", icon: ""))
+        pump { !model.busy }
+        let statusLine = model.output.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init).first { $0.contains("Succeeded · Exit 0") } ?? ""
+        precondition(statusLine.hasPrefix("["),
+                     "Status line must start at column 0 (begin with the '[time]' bracket), got: '\(statusLine)'")
+        precondition(!statusLine.hasPrefix(" "),
+                     "Status line must not be indented to brew's stale cursor column: '\(statusLine)'")
+        print("PASS: completion status line starts at column 0 even when brew output has no trailing newline")
+
         // Interactive [y/n] prompt: a fake brew that prints the ask-mode prompt then reads one char
         // from its TTY. The model must arm awaitingInput on the prompt line, answering "y" must let
         // it proceed to exit 0, and the prompt must NOT re-arm on the echoed answer / later output.
