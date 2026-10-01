@@ -6,6 +6,35 @@ A native SwiftUI menu-bar app for **Homebrew** on Apple Silicon, macOS 13 Ventur
 
 ![BrewBar maintenance dashboard in dark mode](docs/assets/hero.png)
 
+## 🔒 Your password is never stored
+
+Some casks (like Zoom) run a `.pkg` installer that needs administrator rights. When Homebrew asks for your Mac password, BrewBar prompts you securely and passes it **straight to macOS `sudo`**. Your password is **never saved, never logged, never written to disk, never stored in the Keychain, never placed in command arguments or environment variables, and never sent over the network.** It is held in memory for a single Homebrew command, then discarded.
+
+<details>
+<summary><b>Details — how it works, for the technically curious</b></summary>
+
+**In two lines:** the password lives only in RAM for one Homebrew command — typed into a masked `SecureField` → `BrewModel.passwordDraft`, handed to `AskpassBroker`, then written to a private `0600` FIFO (named pipe) that the `SUDO_ASKPASS` helper streams to `sudo`'s standard input. It is never placed in a command's arguments, in an environment variable, on disk, in the macOS Keychain, or in the console log.
+
+**The full path your password takes**
+
+- **While you type it:** an in-memory string bound to a masked `SecureField`. Nothing is written anywhere yet.
+- **On Submit:** it is handed to a one-shot broker and the on-screen draft is cleared immediately.
+- **Reaching sudo:** the broker writes it to a FIFO — an in-kernel pipe buffer, *not* a file on disk — inside a private per-command temp directory (mode `0700`, the pipe `0600`, owned only by you). A tiny helper script (the standard macOS `SUDO_ASKPASS` mechanism) reads from that pipe and passes the password to `sudo`. For a multi-step action (e.g. uninstalling an app that removes several services), you type it **once** and the rest are answered from memory.
+- **When it's destroyed:** the draft is cleared on submit/cancel and whenever the prompt closes; the broker's in-memory copy and the temp pipe are deleted the instant the command finishes, is stopped, or the console is cleared. Nothing survives the command — let alone an app restart.
+
+**Where it is _not_**
+
+- Never in a command's arguments (`argv`) — `brew` and `sudo` are launched with fixed argument lists.
+- Never in an environment variable — `SUDO_ASKPASS` holds the *helper's path*, not your password.
+- Never in a regular file, the macOS Keychain, `UserDefaults`, or any preference.
+- Never written to the console output, and never sent over the network.
+
+**Honest caveats**
+
+Swift strings aren't guaranteed to be zeroed by the runtime, so a transient copy may briefly remain in freed memory until reused — the same practical limit every GUI `sudo` front-end has. BrewBar best-effort zeroes its own byte buffer after use and holds the value only for one command. The entire mechanism is open source in [`src/Sources/BrewBar/AskpassBroker.swift`](src/Sources/BrewBar/AskpassBroker.swift), so you can read exactly what it does.
+
+</details>
+
 ## The panel
 
 Everything lives in one menu-bar window:
@@ -32,7 +61,7 @@ Gallery images are native offscreen renders of BrewBar's interface, produced fro
 
 ## Install
 
-1. Download and extract [BrewBar-1.28.5.zip](docs/downloads/BrewBar-1.28.5.zip).
+1. Download and extract [BrewBar-1.29.zip](docs/downloads/BrewBar-1.29.zip).
 2. Drag `BrewBar.app` to Applications, then right-click → Open the first time.
 3. Click the Terminal Mug glyph in the menu bar to open the panel.
 

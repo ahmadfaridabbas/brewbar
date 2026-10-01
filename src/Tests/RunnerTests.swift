@@ -410,6 +410,67 @@ import Darwin
         precondition(PackageInfo.formatBytes(0) == "—" && PackageInfo.formatBytes(512) == "512 B" && PackageInfo.formatBytes(1536) == "1.5 KB", "Byte formatting")
         print("PASS: package info parsing (formula deps/size/caveats, cask depends_on, homepage guard, byte format)")
 
+        // AskpassBroker: the secure SUDO_ASKPASS channel. First the pure parts, then a full
+        // end-to-end handshake exercising the real helper script the way sudo would run it.
+        // (1) Pure: the helper script signals a request then execs `cat` on the response FIFO, and
+        //     single-quote escaping neutralises any quote in a path (defence-in-depth).
+        let script = AskpassBroker.helperScript(requestPath: "/tmp/req", responsePath: "/tmp/resp")
+        precondition(script.contains("printf 'x' > '/tmp/req'"), "helper must signal a request first: \(script)")
+        precondition(script.contains("exec cat '/tmp/resp'"), "helper must exec cat the response FIFO: \(script)")
+        precondition(script.hasPrefix("#!/bin/sh"), "helper needs a shebang")
+        precondition(AskpassBroker.shellSingleQuote("a'b") == "a'\\''b", "single-quote must be escaped")
+        precondition(!script.contains(" rm ") && !script.contains("$("), "helper must not contain stray shell execution")
+        // (2) End-to-end: create a broker, run its helper exactly as sudo would (an independent
+        //     child process whose stdout we capture), and when the broker reports a request, send a
+        //     password. The helper's stdout must equal the password + newline — i.e. sudo would read
+        //     the correct password. Verifies the FIFO request-signal → prompt → response round-trip.
+        do {
+            let broker = try! AskpassBroker()
+            defer { broker.cleanup() }
+            precondition(FileManager.default.isExecutableFile(atPath: broker.helperPath), "helper must be executable")
+            var requested = false
+            broker.startWatching { requested = true }
+            // Run the helper like sudo does: it blocks writing the request signal (until our watcher
+            // opens the request FIFO), then blocks on `cat` of the response FIFO.
+            let helper = CommandRunner()
+            var helperOut = ""
+            var helperDone = false
+            helper.run(executable: "/bin/sh", arguments: [broker.helperPath],
+                       environment: ProcessInfo.processInfo.environment) { data in
+                helperOut += String(decoding: data, as: UTF8.self)
+            } completion: { code, _ in
+                precondition(code == 0, "askpass helper should exit 0 after delivering the password")
+                helperDone = true
+            }
+            // The watcher should fire once sudo (the helper) signals.
+            pump { requested }
+            precondition(requested, "broker must report a request when the helper signals")
+            broker.sendPassword("hunter2")
+            pump { helperDone }
+            precondition(helperOut == "hunter2\n", "helper stdout (what sudo reads) must be the password: '\(helperOut)'")
+            print("PASS: askpass broker end-to-end — request signal arms the prompt, password is delivered to the helper's stdout")
+        }
+        // (3) Decline path: a declined prompt hands the helper an EMPTY line, so sudo would get no
+        //     password and fail authentication (brew then aborts the cask cleanly).
+        do {
+            let broker = try! AskpassBroker()
+            defer { broker.cleanup() }
+            var requested = false
+            broker.startWatching { requested = true }
+            let helper = CommandRunner()
+            var helperOut = ""
+            var helperDone = false
+            helper.run(executable: "/bin/sh", arguments: [broker.helperPath],
+                       environment: ProcessInfo.processInfo.environment) { data in
+                helperOut += String(decoding: data, as: UTF8.self)
+            } completion: { _, _ in helperDone = true }
+            pump { requested }
+            broker.declineOnce()
+            pump { helperDone }
+            precondition(helperOut == "\n", "decline must hand the helper only a newline (empty password): '\(helperOut)'")
+            print("PASS: askpass broker decline — delivers an empty password so sudo auth fails cleanly")
+        }
+
 
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }

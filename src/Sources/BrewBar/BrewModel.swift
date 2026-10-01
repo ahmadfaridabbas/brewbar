@@ -115,6 +115,20 @@ struct BrewAction: Identifiable {
     @Published var awaitingInput = false
     /// The prompt line brew printed (shown next to the Yes/No buttons).
     @Published var promptText = ""
+    /// True while the running command is blocked on `sudo`'s admin-password prompt — a cask whose
+    /// payload runs `/usr/sbin/installer -pkg` (e.g. `zoom`). The console then shows a secure
+    /// password field wired to `submitPassword(_:)` / `cancelPassword()`. The password BrewBar
+    /// collects is handed to sudo through `AskpassBroker` (an in-memory → FIFO channel; it never
+    /// touches argv, env, or a regular file). Set from the broker's request watcher.
+    @Published var awaitingPassword = false
+    /// The admin-password the user is typing into the secure field (bound via `PasswordPromptBar`).
+    /// Lives only in memory and is cleared the instant it's submitted or the prompt is dismissed —
+    /// it is never logged, placed in argv/env, or written to disk. It transits to sudo only through
+    /// the `AskpassBroker`'s private FIFO.
+    @Published var passwordDraft = ""
+    /// The broker answering sudo's askpass for the current cask command. Created only for cask
+    /// install/upgrade commands; torn down when the command ends / stops / the console is cleared.
+    private var askpass: AskpassBroker?
     /// Live download progress for the console's pinned block. Homebrew's parallel download queue
     /// reports several packages at once, so this is a collection keyed by package name (insertion-
     /// ordered) rather than a single slot — each entry pairs the right name with the right bytes,
@@ -213,6 +227,7 @@ struct BrewAction: Identifiable {
         uninstallCandidate = nil
         busy = true; stopping = false; failed = false; exitCode = nil
         awaitingInput = false; promptText = ""; clearDownload(); recovery = nil
+        awaitingPassword = false; passwordDraft = ""; teardownAskpass()
         lastArguments = arguments
         started = Date(); finished = nil; command = "brew " + arguments.joined(separator: " "); status = "Running"
         pending.removeAll(); truncated = false; cleanRemainder = ""
@@ -226,12 +241,28 @@ struct BrewAction: Identifiable {
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Homebrew maintenance")
         let process = CommandRunner(); runner = process
         usingPTY = standardOutputFile == nil
+        // A cask install/upgrade may run a `.pkg` installer that needs `sudo`. For those commands,
+        // wire up a secure askpass broker: brew sees `SUDO_ASKPASS=<helper>` → passes `sudo -A` →
+        // sudo runs our helper → the helper signals us and waits for the password on a private FIFO.
+        // Every other command keeps the environment's `SUDO_ASKPASS=/usr/bin/false` so an unexpected
+        // sudo still fails fast rather than hanging on a hidden prompt. Only on the PTY path (no
+        // standardOutputFile) — JSON captures never install anything.
+        var commandEnvironment = environment
+        if standardOutputFile == nil, Self.commandMayNeedAdminPassword(arguments),
+           let broker = try? AskpassBroker() {
+            askpass = broker
+            commandEnvironment["SUDO_ASKPASS"] = broker.helperPath
+            broker.startWatching { [weak self] in
+                guard let self = self, self.busy, !self.stopping else { return }
+                self.awaitingPassword = true
+            }
+        }
         outputTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.flush() }
         }
         // Interactive commands run under a PTY so brew emits its live progress bar. JSON captures
         // (standardOutputFile set) stay on a plain pipe for clean, parseable output.
-        process.run(executable: path, arguments: arguments, environment: environment,
+        process.run(executable: path, arguments: arguments, environment: commandEnvironment,
                     standardOutputFile: standardOutputFile, usePTY: standardOutputFile == nil) { [weak self] data in
             self?.pending.append(data)
         } completion: { [weak self] code, cancelled in
@@ -240,6 +271,7 @@ struct BrewAction: Identifiable {
             self.outputTimer?.invalidate(); self.outputTimer = nil
             self.exitCode = code; self.finished = Date(); self.busy = false; self.stopping = false
             self.awaitingInput = false; self.promptText = ""; self.clearDownload()
+            self.awaitingPassword = false; self.passwordDraft = ""; self.teardownAskpass()
             self.failed = code != 0 && !cancelled
             self.status = cancelled ? "Cancelled" : (code == 0 ? "Succeeded" : "Needs attention")
             // Offer a one-click fix when the failure is a resumable-download dead-end (curl-56 /
@@ -609,6 +641,58 @@ struct BrewAction: Identifiable {
         runner?.send(proceed ? "y" : "n")
     }
 
+    /// Whether `arguments` could trigger a `sudo` admin-password prompt — i.e. a cask operation whose
+    /// payload runs a privileged step (a `.pkg` installer via `/usr/sbin/installer`, or removing
+    /// launchctl services / pkg receipts on uninstall), like `zoom`. We enable the askpass broker for:
+    ///   • `install` / `reinstall` / `upgrade` that includes `--cask`
+    ///   • a bare `upgrade` (no package named) — it upgrades everything, which may include casks
+    ///   • `uninstall` / `zap` that includes `--cask` (removes services + pkg receipts via sudo)
+    /// Formula-only commands never need sudo (Homebrew installs into a user-writable prefix), and
+    /// read-only/JSON commands (outdated/info/search/list) never touch privileged state. Pure/static
+    /// for testing.
+    static func commandMayNeedAdminPassword(_ arguments: [String]) -> Bool {
+        guard let verb = arguments.first else { return false }
+        switch verb {
+        case "install", "reinstall", "uninstall", "zap":
+            return arguments.contains("--cask")
+        case "upgrade":
+            // `brew upgrade` with no token upgrades all installed packages (casks included).
+            let hasToken = arguments.dropFirst().contains { !$0.hasPrefix("-") }
+            return arguments.contains("--cask") || !hasToken
+        default:
+            return false
+        }
+    }
+
+    /// Deliver the admin password the user typed to the waiting `sudo` (via the askpass broker's
+    /// private FIFO). The password is passed straight to the broker and NOT stored on the model —
+    /// the caller (the secure field binding) is responsible for clearing its own copy. Disarms the
+    /// prompt immediately; sudo may re-ask (wrong password / another authentication), which re-arms
+    /// it through the broker's request watcher.
+    func submitPassword(_ password: String) {
+        guard busy, awaitingPassword else { return }
+        awaitingPassword = false
+        askpass?.sendPassword(password)
+        passwordDraft = ""
+    }
+
+    /// Decline the admin-password prompt: tell the broker to hand sudo an empty password so it fails
+    /// authentication and brew aborts the cask cleanly (reported as "Needs attention"). Used by the
+    /// prompt bar's Cancel button.
+    func cancelPassword() {
+        guard busy, awaitingPassword else { return }
+        awaitingPassword = false
+        askpass?.declineOnce()
+        passwordDraft = ""
+    }
+
+    /// Stop watching and remove the askpass broker's private channel (idempotent). Called when a
+    /// command finishes, on Stop, and on Clear so the FIFOs/helper never outlive their command.
+    private func teardownAskpass() {
+        askpass?.cleanup()
+        askpass = nil
+    }
+
     /// Recover from a detected failure by running the fix appropriate to its kind, then re-running
     /// (or forcing) the exact command that failed. Console output is preserved so the user sees the
     /// whole recovery story in one log. All commands use fixed arguments (no shell interpolation),
@@ -855,7 +939,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.5"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.29"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }
@@ -1217,7 +1301,7 @@ struct BrewAction: Identifiable {
     /// Cancel a pending restore without running anything.
     func cancelRestoreBrewfile() { brewfileRestoreCandidate = nil }
 
-    func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); recovery = nil; status = "Stopping…"; runner?.cancel() }
+    func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; awaitingPassword = false; passwordDraft = ""; teardownAskpass(); clearDownload(); recovery = nil; status = "Stopping…"; runner?.cancel() }
     func clear() { terminal.reset(); output = ""; pending.removeAll(); cleanRemainder = ""; truncated = false; clearDownload(); recovery = nil }
     func copy() {
         var text = output

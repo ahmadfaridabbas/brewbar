@@ -505,6 +505,117 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
                      "firefox row must show the LAST frame's bytes: '\(ffRows[0])'")
         print("PASS: flush slicing (UTF-8 + escapeSafeCount) renders a split-escape queue stream cleanly")
 
+        // Admin-password (askpass) — command classifier: only cask install/upgrade (and a bare
+        // `upgrade`, which may touch casks) can need sudo. Formula-only and read-only commands never
+        // enable the broker. Pure/static, so assert the exact routing.
+        precondition(BrewModel.commandMayNeedAdminPassword(["install", "--cask", "zoom"]), "cask install needs askpass")
+        precondition(BrewModel.commandMayNeedAdminPassword(["upgrade", "--cask", "--force", "zoom"]), "cask upgrade needs askpass")
+        precondition(BrewModel.commandMayNeedAdminPassword(["upgrade"]), "bare upgrade may touch casks")
+        precondition(BrewModel.commandMayNeedAdminPassword(["reinstall", "--cask", "zoom"]), "cask reinstall needs askpass")
+        precondition(BrewModel.commandMayNeedAdminPassword(["uninstall", "--cask", "zoom"]), "cask uninstall needs askpass (removes services/receipts via sudo)")
+        precondition(BrewModel.commandMayNeedAdminPassword(["zap", "--cask", "zoom"]), "cask zap needs askpass")
+        precondition(!BrewModel.commandMayNeedAdminPassword(["install", "--formula", "wget"]), "formula install never needs sudo")
+        precondition(!BrewModel.commandMayNeedAdminPassword(["upgrade", "--formula", "wget"]), "formula upgrade never needs sudo")
+        precondition(!BrewModel.commandMayNeedAdminPassword(["uninstall", "--formula", "wget"]), "formula uninstall never needs sudo")
+        precondition(!BrewModel.commandMayNeedAdminPassword(["outdated", "--json=v2"]), "read-only command never needs sudo")
+        precondition(!BrewModel.commandMayNeedAdminPassword([]), "empty args never need sudo")
+        print("PASS: askpass command classifier routes only cask install/upgrade/uninstall/zap (and bare upgrade)")
+
+        // Admin-password (askpass) — END-TO-END through BrewModel. A fake brew mimics Homebrew's
+        // pkg-cask flow: it reads SUDO_ASKPASS from its env (which BrewModel set to the broker's
+        // helper), runs that helper to obtain the password (exactly as `sudo -A` would), writes what
+        // it got to a capture file, and exits 0 only if the password matches. BrewModel must arm
+        // `awaitingPassword` when the helper signals, deliver the typed password via submitPassword,
+        // and the command must then succeed. Proves the whole model→broker→helper handshake.
+        let pwCapture = folder.appendingPathComponent("pw-capture")
+        let askBrew = folder.appendingPathComponent("askpass-brew")
+        try """
+        #!/bin/sh
+        # Mimic `brew install --cask zoom` needing sudo: use the askpass helper like `sudo -A`.
+        printf '==> Downloading zoom\\n'
+        printf '==> Installing Cask zoom\\n'
+        if [ -z "$SUDO_ASKPASS" ]; then
+          printf 'sudo: a password is required\\n' >&2
+          exit 1
+        fi
+        PW=$("$SUDO_ASKPASS")
+        printf '%s' "$PW" > '\(pwCapture.path)'
+        [ "$PW" = "s3cret" ] && exit 0
+        printf 'sudo: incorrect password\\n' >&2
+        exit 1
+        """.write(to: askBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: askBrew.path)
+        model.brewPath = askBrew.path
+        model.searchResults = [SearchResult(token: "zoom", name: "Zoom", detail: "", version: "7", kind: "App", installed: false)]
+        model.install(model.searchResults[0])
+        precondition(model.busy, "cask install should start")
+        // The fake brew runs the helper, which signals a request; BrewModel must arm the prompt.
+        pump { model.awaitingPassword }
+        precondition(model.awaitingPassword, "BrewModel must arm awaitingPassword when sudo asks")
+        model.submitPassword("s3cret")
+        precondition(!model.awaitingPassword, "submitting must disarm the prompt")
+        // On install success the model flips the result to installed (then chains a refresh). Wait
+        // for that flip, which proves the install exited 0 — i.e. the correct password reached sudo.
+        pump { model.searchResults.first?.installed == true }
+        let delivered = (try? String(contentsOf: pwCapture, encoding: .utf8)) ?? ""
+        precondition(delivered == "s3cret", "the askpass helper must have delivered the exact password, got: '\(delivered)'")
+        precondition(model.searchResults.first?.installed == true, "install should succeed once the correct password is delivered")
+        pump { !model.busy }
+        try? FileManager.default.removeItem(at: pwCapture)
+        print("PASS: askpass end-to-end — model arms awaitingPassword, delivers the password to sudo, cask install succeeds")
+
+        // Admin-password (askpass) — CANCEL path. Same fake brew, but the user cancels: the broker
+        // hands sudo an empty password, so brew exits non-zero ("Needs attention"). No password is
+        // captured as correct.
+        model.brewPath = askBrew.path
+        model.searchResults = [SearchResult(token: "zoom", name: "Zoom", detail: "", version: "7", kind: "App", installed: false)]
+        model.install(model.searchResults[0])
+        pump { model.awaitingPassword }
+        model.cancelPassword()
+        precondition(!model.awaitingPassword, "cancel must disarm the prompt")
+        pump { !model.busy }
+        precondition(model.exitCode != 0 && model.failed, "cancelling the password must fail the install (Needs attention)")
+        precondition(model.searchResults.first?.installed == false, "a cancelled install must not flip to installed")
+        model.brewPath = fixture.path
+        print("PASS: askpass cancel — empty password fails the install cleanly")
+
+        // Admin-password (askpass) — REPEATED prompts in ONE command (the cask-uninstall case: brew
+        // runs sudo several times for launchctl services + pkg receipts). The user must type the
+        // password ONCE; the broker caches it and auto-answers the rest. A fake brew calls the
+        // askpass helper TWICE and succeeds only if BOTH reads returned the right password.
+        let twoCapture = folder.appendingPathComponent("pw-capture-2")
+        let twiceBrew = folder.appendingPathComponent("twice-brew")
+        try """
+        #!/bin/sh
+        # Mimic `brew uninstall --cask zoom` needing sudo more than once.
+        printf '==> Uninstalling Cask zoom\\n'
+        [ -z "$SUDO_ASKPASS" ] && { printf 'sudo: a password is required\\n' >&2; exit 1; }
+        A=$("$SUDO_ASKPASS")
+        B=$("$SUDO_ASKPASS")
+        printf '%s|%s' "$A" "$B" > '\(twoCapture.path)'
+        { [ "$A" = "s3cret" ] && [ "$B" = "s3cret" ]; } && exit 0
+        printf 'sudo: a password is required\\n' >&2
+        exit 1
+        """.write(to: twiceBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: twiceBrew.path)
+        model.brewPath = twiceBrew.path
+        model.packages = [InstalledPackage(token: "zoom", name: "Zoom", detail: "", version: "7", kind: "App")]
+        var promptCount = 0
+        // Observe how many times the UI would be asked — we only submit on the first arming.
+        model.uninstall(model.packages[0])
+        precondition(model.busy, "cask uninstall should start")
+        pump { model.awaitingPassword }
+        promptCount += 1
+        model.submitPassword("s3cret")   // type ONCE
+        pump { !model.busy }
+        let both = (try? String(contentsOf: twoCapture, encoding: .utf8)) ?? ""
+        precondition(both == "s3cret|s3cret", "both sudo prompts must receive the cached password, got: '\(both)'")
+        precondition(model.exitCode == 0, "uninstall should succeed once both prompts are answered")
+        precondition(promptCount == 1, "the user must be asked only once; repeats are auto-answered")
+        try? FileManager.default.removeItem(at: twoCapture)
+        model.brewPath = fixture.path
+        print("PASS: askpass caches the password — repeated sudo prompts in one command are answered after a single entry")
+
         print("PASS: UninstallTests")
     }
     static func pump(_ done: () -> Bool) {

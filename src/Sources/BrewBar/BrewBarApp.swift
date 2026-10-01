@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.28.5"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.29"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -314,6 +314,10 @@ struct Dashboard: View {
                     .accessibilityLabel("\(model.promptText). Press Yes to proceed or No to abort.")
                     Divider()
                 }
+                if model.awaitingPassword {
+                    PasswordPromptBar(model: model, theme: theme)
+                    Divider()
+                }
                 if let recovery = model.recovery, !model.busy {
                     HStack(spacing: 10) {
                         Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(theme.warning)
@@ -402,6 +406,53 @@ struct Dashboard: View {
             theme.background.overlay(PaperGrain(opacity: theme.grainOpacity))
         }
     }
+}
+
+/// The secure admin-password prompt shown in the console when `sudo` asks (a cask pkg install, e.g.
+/// zoom). Extracted into its own small view for two reasons: (1) it owns the transient `@State`
+/// password string so the field value never lives on the shared model; (2) keeping this out of the
+/// large `Dashboard.body` avoids SwiftUI's "unable to type-check in reasonable time" on the heavy
+/// surrounding expression (same reason `ConsoleOutput` was extracted). Mirrors the `[y/n]` bar's
+/// accent styling with a `SecureField` + Submit/Cancel.
+struct PasswordPromptBar: View {
+    @ObservedObject var model: BrewModel
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lock.fill").foregroundStyle(theme.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Homebrew needs your Mac password to install this app.")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                SecureField("Password", text: $model.passwordDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+                    .frame(maxWidth: 220)
+                    .onSubmit(submit)
+            }
+            Spacer(minLength: 8)
+            Button(action: cancel) { Text("Cancel") }
+                .buttonStyle(.bordered).controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+                .help("Decline — the install stops without changing anything")
+            Button(action: submit) { Text("Submit") }
+                .buttonStyle(.borderedProminent).controlSize(.small)
+                .keyboardShortcut(.defaultAction)
+                .disabled(model.passwordDraft.isEmpty)
+                .help("Send your password to the installer (used once, never stored)")
+        }
+        .font(.system(size: 11)).padding(10)
+        .background(theme.accent.opacity(0.10))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Homebrew needs your Mac password to install this app. Enter it and press Submit, or Cancel to stop.")
+    }
+
+    /// Hand the typed password to the model (which forwards it to the askpass broker). The model
+    /// zeroes/clears the draft as part of submit, so it isn't retained after use.
+    private func submit() { model.submitPassword(model.passwordDraft) }
+    private func cancel() { model.cancelPassword() }
 }
 
 /// A lightweight, static paper-grain overlay. Rendered once as a stack of faint tiled speckles
