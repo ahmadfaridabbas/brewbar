@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.28.5: Multi-download console no longer garbles (flush chunk-boundary fix)
+
+Fixes the long-standing multi-item download garble that resurfaced on real `brew upgrade` with two concurrent casks (e.g. firefox + google-chrome): the live download block drifted and left a trail of stale rows, byte counters broke onto their own lines, and `· name — X MB / Y MB` snapshot lines leaked into the scrollback mid-download.
+
+**Root cause.** `BrewModel.flush` runs on a 0.1s timer and trimmed incomplete *UTF-8* at chunk boundaries but not incomplete *ANSI escape sequences* or partial lines. Homebrew's parallel download queue redraws its block every ~0.05s with CSI cursor-motion/erase codes (`ESC[1F`, `ESC[K`, `ESC[?2026h/l`). When a flush slice ended in the middle of one of those sequences, two things broke: (1) the terminal emulator's `consumeEscape` ran off the end of the buffer and silently dropped the sequence, so a frame's cursor-up or erase was lost and the block drifted downward; (2) the structured parser (`detectDownload`) received partial lines, which spuriously matched a finish pattern and fired `commitDownloads()` mid-download, folding a snapshot into the scrollback. The emulator logic itself was correct — a whole-stream replay rendered cleanly; only the chunk-splitting was at fault.
+
+**Fix.** `flush` now holds back a trailing incomplete escape sequence (a static `escapeSafeCount` scans for an unterminated `ESC`/CSI/OSC and defers it to the next slice, exactly as the UTF-8 trim already did), and buffers a trailing partial line (`cleanRemainder`) so the parser only ever sees complete lines. Both deferrals are flushed on the final read. Verified against a real captured firefox+chrome queue stream (replayed whole = clean; replayed in escape-splitting slices = clean with the fix, garbled without). Regression tests: a pure `escapeSafeCount` unit suite (lone ESC, partial CSI, partial DEC-private, complete sequence, no-escape) and a deterministic slicing simulation that replays the queue stream through the exact flush slicing + emulator and asserts one firefox + one chrome row (bypassing the guard reproduces the drift + garbled escape fragments).
+
+Optimized arm64 build verified; the built bundle reports version 1.28.5 (build 37). All 27 test suites pass.
+
 ## Version 1.28.4: About-check console block no longer cascades; tighter line spacing
 
 A follow-up to 1.28.3. The manual update-check prints an About block to the console — `[time] Checking for BrewBar updates…`, then `Current version:` / `Bundle ID:` / `Location:` / `macOS:` / the result line. 1.28.3 aligned the labels *within* the block, but the block as a whole still began at the stale cursor column left by the previous command's output, and because every internal line feed preserves the column (correct per the 1.28 terminal model), each line cascaded progressively further to the right.

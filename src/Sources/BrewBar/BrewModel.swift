@@ -139,6 +139,13 @@ struct BrewAction: Identifiable {
     private var runner: CommandRunner?
     private var activity: NSObjectProtocol?
     private var pending = Data()
+    /// A trailing partial line held back from the DownloadProgressParser until the next flush
+    /// completes it. A flush slice can split a line mid-way; feeding a fragment to the parser can
+    /// spuriously match a finish pattern (firing a mid-download commit) or miss a start line. We only
+    /// ever hand the parser COMPLETE lines, carrying the unfinished tail here. Cleared on command
+    /// start / clear / stop. (Only affects the structured download block; the console mirror still
+    /// gets brew's exact bytes.)
+    private var cleanRemainder = ""
     private var outputTimer: Timer?
     private var resolutionID = UUID()
     private var truncated = false
@@ -208,7 +215,7 @@ struct BrewAction: Identifiable {
         awaitingInput = false; promptText = ""; clearDownload(); recovery = nil
         lastArguments = arguments
         started = Date(); finished = nil; command = "brew " + arguments.joined(separator: " "); status = "Running"
-        pending.removeAll(); truncated = false
+        pending.removeAll(); truncated = false; cleanRemainder = ""
         let heading = "[\(Date().formatted(date: .omitted, time: .standard))] $ \(command)\n"
         // When preserving the previous log (a chained command: search→info, upgrade→recheck, etc.)
         // the heading is appended after the prior command's status line, whose trailing `\n` leaves
@@ -465,6 +472,15 @@ struct BrewAction: Identifiable {
                     if required > offset { count -= offset }; break
                 }
             }
+            // Also keep an incomplete ANSI escape sequence until the following read. Homebrew's
+            // parallel download queue rewrites its block every ~0.05s with CSI cursor-motion /
+            // erase codes (`ESC[1F`, `ESC[K`, `ESC[?2026h/l`). A 0.1s flush slice can end in the
+            // MIDDLE of one of those sequences; feeding the fragment to the emulator makes
+            // `consumeEscape` run off the end and silently drop the sequence, so a frame's cursor-up
+            // or erase is lost and the block drifts/garbles. Reduce `count` to before any trailing
+            // unterminated ESC so the whole sequence is emitted together next time. (Operate on a
+            // stable byte array — `Data` indices rebase after `removeFirst`.)
+            count = Self.escapeSafeCount([UInt8](pending), upTo: count)
         }
         guard count > 0 else { return }
         let text = String(decoding: pending.prefix(count), as: UTF8.self)
@@ -487,11 +503,79 @@ struct BrewAction: Identifiable {
         // The structured live-download block (DownloadProgressParser) wants clean, control-free
         // lines. Strip ANSI and normalise CR/CUP to newlines for the parser's input only — the
         // console mirror above keeps brew's exact in-place rendering.
-        var clean = text.replacingOccurrences(of: "\u{001B}\\[[0-9]*[GF]", with: "\n", options: .regularExpression)
+        var clean = cleanRemainder + text
+        cleanRemainder = ""
+        clean = clean.replacingOccurrences(of: "\u{001B}\\[[0-9]*[GF]", with: "\n", options: .regularExpression)
         clean = clean.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
         clean = clean.replacingOccurrences(of: "\r\n", with: "\n")
+        // The parser must only ever see COMPLETE lines. A flush slice can split a line mid-way; a
+        // fragment can spuriously match a finish pattern (`==>` / `Downloaded`) and fire a mid-
+        // download commit (leaking a `· name — …` snapshot into the scrollback), or miss a start
+        // line entirely. Hold back the trailing partial line (everything after the last newline/CR)
+        // until the next flush completes it. On the final flush, emit whatever remains.
+        if !final, let lastBreak = clean.lastIndex(where: { $0 == "\n" || $0 == "\r" }) {
+            let split = clean.index(after: lastBreak)
+            cleanRemainder = String(clean[split...])
+            clean = String(clean[..<split])
+        } else if !final {
+            // No line break at all this slice — the whole thing is an unfinished line; defer it.
+            cleanRemainder = clean
+            clean = ""
+        }
         detectPrompt()
-        detectDownload(in: clean)
+        if !clean.isEmpty { detectDownload(in: clean) }
+    }
+
+    /// Return how many of the first `upTo` bytes of `data` are safe to emit without cutting an ANSI
+    /// escape sequence in half. If the slice ends in an unterminated escape — a trailing `ESC`
+    /// (`0x1B`), or an `ESC` followed by CSI/OSC-introducer bytes with no final byte yet — the count
+    /// is reduced to just before that `ESC` so the complete sequence is emitted on the next flush.
+    /// A CSI sequence (`ESC[`) terminates on a byte in 0x40–0x7E; an OSC (`ESC]`) on BEL or ESC\\.
+    static func escapeSafeCount(_ data: [UInt8], upTo: Int) -> Int {
+        // Scan backward from the slice end for the last ESC within a short window (sequences are
+        // short; brew's are < 12 bytes). If that ESC's sequence isn't terminated inside the slice,
+        // hold back from the ESC.
+        let esc: UInt8 = 0x1B
+        var i = upTo - 1
+        let floor = max(0, upTo - 24)
+        while i >= floor {
+            if data[i] == esc {
+                // Does a terminated sequence end before `upTo`? Check the bytes after this ESC.
+                if isCompleteEscape(data, start: i, end: upTo) { return upTo }
+                return i   // unterminated — hold back from here
+            }
+            i -= 1
+        }
+        return upTo
+    }
+
+    /// Whether the escape sequence beginning at `start` (where `data[start] == ESC`) is fully
+    /// contained in `data[start..<end]`.
+    private static func isCompleteEscape(_ data: [UInt8], start: Int, end: Int) -> Bool {
+        guard start + 1 < end else { return false }  // just a lone ESC
+        let second = data[start + 1]
+        switch second {
+        case UInt8(ascii: "["):  // CSI: parameters/intermediates, then a final byte 0x40–0x7E.
+            var j = start + 2
+            while j < end {
+                let b = data[j]
+                if b >= 0x40 && b <= 0x7E { return true }  // final byte
+                j += 1
+            }
+            return false
+        case UInt8(ascii: "]"):  // OSC: terminated by BEL (0x07) or ESC\ (0x1B 0x5C).
+            var j = start + 2
+            while j < end {
+                if data[j] == 0x07 { return true }
+                if data[j] == 0x1B && j + 1 < end && data[j + 1] == 0x5C { return true }
+                j += 1
+            }
+            return false
+        default:
+            // Two-byte escape (e.g. ESC(B) or a control we don't special-case: complete once the
+            // second byte is present.
+            return true
+        }
     }
 
     /// Recognise brew's interactive confirmation (`ohai "Do you want to proceed with the … ? [y/n]"`)
@@ -771,7 +855,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.4"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.5"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }
@@ -1134,7 +1218,7 @@ struct BrewAction: Identifiable {
     func cancelRestoreBrewfile() { brewfileRestoreCandidate = nil }
 
     func stop() { guard busy else { return }; stopping = true; awaitingInput = false; promptText = ""; clearDownload(); recovery = nil; status = "Stopping…"; runner?.cancel() }
-    func clear() { terminal.reset(); output = ""; pending.removeAll(); truncated = false; clearDownload(); recovery = nil }
+    func clear() { terminal.reset(); output = ""; pending.removeAll(); cleanRemainder = ""; truncated = false; clearDownload(); recovery = nil }
     func copy() {
         var text = output
         if !downloads.isEmpty {

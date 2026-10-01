@@ -426,6 +426,85 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
                      "macOS row must start at col 0, got: '\(macOSLine)'")
         print("PASS: About update-check header starts every line at column 0 (no cascade)")
 
+        // escapeSafeCount (chunk-boundary guard): flush must not hand the emulator a trailing
+        // incomplete escape sequence. The helper returns how many bytes are safe to emit now.
+        func bytesOf(_ s: String) -> [UInt8] { Array(s.utf8) }
+        let escComplete = bytesOf("abc\u{1B}[1Fdef")                 // ESC[1F fully present
+        precondition(BrewModel.escapeSafeCount(escComplete, upTo: escComplete.count) == escComplete.count,
+                     "a complete escape must not be held back")
+        let escLone = bytesOf("abc\u{1B}")                            // trailing lone ESC
+        precondition(BrewModel.escapeSafeCount(escLone, upTo: escLone.count) == 3,
+                     "a trailing lone ESC must be held back (emit only 'abc')")
+        let escPartialCSI = bytesOf("abc\u{1B}[1")                    // ESC[1 — no final byte yet
+        precondition(BrewModel.escapeSafeCount(escPartialCSI, upTo: escPartialCSI.count) == 3,
+                     "a partial CSI must be held back until its final byte")
+        let escPartialPrivate = bytesOf("x\u{1B}[?2026")              // ESC[?2026 — no 'h'/'l' yet
+        precondition(BrewModel.escapeSafeCount(escPartialPrivate, upTo: escPartialPrivate.count) == 1,
+                     "a partial DEC-private sequence must be held back")
+        let noEsc = bytesOf("plain text no escapes")
+        precondition(BrewModel.escapeSafeCount(noEsc, upTo: noEsc.count) == noEsc.count,
+                     "text without escapes is fully emittable")
+        print("PASS: escapeSafeCount holds back only trailing incomplete escape sequences")
+
+        // DETERMINISTIC chunk-boundary regression: replay a real two-item queue stream through the
+        // EXACT slicing flush() applies (UTF-8 trim + escapeSafeCount) in fixed byte steps that fall
+        // inside escape sequences, feeding each safe slice to a TerminalEmulator. With the guard,
+        // every ESC[1F / ESC[K is emitted whole, so the block stays 1 firefox + 1 chrome row. Revert
+        // escapeSafeCount (make it return `upTo`) and this fails: dropped escapes let the block drift
+        // into many stale rows — the exact screenshot garble.
+        func utf8Trim(_ bytes: [UInt8], _ raw: Int) -> Int {
+            var count = raw
+            let tail = Array(bytes.suffix(4))
+            if tail.isEmpty { return count }
+            for offset in 1...min(4, tail.count) {
+                let b = tail[tail.count - offset]
+                if b & 0xc0 != 0x80 {
+                    let required = b < 0x80 ? 1 : (b & 0xe0 == 0xc0 ? 2 : (b & 0xf0 == 0xe0 ? 3 : 4))
+                    if required > offset { count -= offset }; break
+                }
+            }
+            return count
+        }
+        func qf(_ a: String, _ b: String) -> String {
+            "\u{1B}[?2026h\(a)\r\n\u{1B}[K\(b)\u{1B}[K\u{1B}[1F\u{1B}[?2026l"
+        }
+        var queueStream = "Fetching: firefox, google-chrome\r\n"
+        for i in 0..<6 {
+            queueStream += qf("\u{1B}[34m\u{2819}\u{1B}[0m Cask firefox (157.0) \(String(repeating: "#", count: i)) Downloading \(i).0MB/161.3MB",
+                              "\u{1B}[34m\u{2819}\u{1B}[0m Cask google-chrome (154.0) \(String(repeating: "#", count: i)) Downloading \(i*2).0MB/282.8MB")
+        }
+        let pendingBytes = Array(queueStream.utf8)
+        var term = TerminalEmulator()
+        let stepBytes = 9   // small enough to land inside ESC[...] sequences
+        var cursor = 0
+        var buffer = [UInt8]()
+        while cursor < pendingBytes.count || !buffer.isEmpty {
+            if cursor < pendingBytes.count {
+                let end = min(cursor + stepBytes, pendingBytes.count)
+                buffer.append(contentsOf: pendingBytes[cursor..<end]); cursor = end
+            }
+            let final = cursor >= pendingBytes.count
+            var count = buffer.count
+            if !final {
+                count = utf8Trim(buffer, count)
+                count = BrewModel.escapeSafeCount(buffer, upTo: count)   // the fix under test
+            }
+            if count <= 0 { if final { break }; continue }
+            term.feed(String(decoding: buffer.prefix(count), as: UTF8.self))
+            buffer.removeFirst(count)
+            if final && buffer.isEmpty { break }
+        }
+        let termLines = term.render().split(separator: "\n", omittingEmptySubsequences: false).map(String.init).filter { !$0.isEmpty }
+        let ffRows = termLines.filter { $0.contains("Cask firefox") }
+        let gcRows = termLines.filter { $0.contains("Cask google-chrome") }
+        precondition(ffRows.count == 1,
+                     "escape-safe slicing must keep ONE firefox row (no drift); got \(ffRows.count): \(term.render())")
+        precondition(gcRows.count == 1,
+                     "escape-safe slicing must keep ONE google-chrome row; got \(gcRows.count): \(term.render())")
+        precondition(ffRows[0].contains("5 Downloading 5.0MB/161.3MB") || ffRows[0].contains("Downloading 5.0MB/161.3MB"),
+                     "firefox row must show the LAST frame's bytes: '\(ffRows[0])'")
+        print("PASS: flush slicing (UTF-8 + escapeSafeCount) renders a split-escape queue stream cleanly")
+
         print("PASS: UninstallTests")
     }
     static func pump(_ done: () -> Bool) {

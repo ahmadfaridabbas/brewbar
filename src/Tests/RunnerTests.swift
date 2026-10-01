@@ -274,7 +274,26 @@ import Darwin
                      "non-PTY row 1 must start at col 0, not stair-step: '\(normLines[1])'")
         precondition(normLines[2] == "==> Updated Homebrew from a to b.",
                      "non-PTY row 2 must start at col 0: '\(normLines[2])'")
-        print("PASS: terminal emulator (CR/CHA rewrite, erase-line, multi-line parallel redraw, CRLF + SGR check mark, non-PTY LF normalization, scrollback)")
+        // ESCAPE-SPLIT SENSITIVITY: a two-item queue frame moves the cursor up with `ESC[1F` and
+        // erases with `ESC[K`. If a flush slice splits one of those sequences, the emulator loses it
+        // and the block drifts. This asserts the emulator renders CLEANLY when fed a WHOLE frame, so
+        // the fix (never hand it a split escape — see BrewModel.escapeSafeCount) is sufficient. Two
+        // frames of a firefox+chrome queue (CR LF LF between the two rows, ESC[1F to climb back).
+        func qframe(_ a: String, _ b: String) -> String {
+            // Matches brew's real queue frame: row A, CR+LF to row B, erase+row B, erase, ESC[1F up.
+            "\(ESC)[?2026h\(a)\r\n\(ESC)[K\(b)\(ESC)[K\(ESC)[1F\(ESC)[?2026l"
+        }
+        var queue = TerminalEmulator()
+        queue.feed(qframe("Cask firefox (157.0) ## Downloading 7.4MB/161.3MB",
+                          "Cask google-chrome (154.0) #### Downloading 21.4MB/282.8MB"))
+        queue.feed(qframe("Cask firefox (157.0) ### Downloading 7.7MB/161.3MB",
+                          "Cask google-chrome (154.0) #### Downloading 23.0MB/282.8MB"))
+        let qlines2 = queue.render().split(separator: "\n", omittingEmptySubsequences: false).map(String.init).filter { !$0.isEmpty }
+        precondition(qlines2.filter { $0.contains("firefox") }.count == 1,
+                     "whole-frame feed must keep ONE firefox row (no drift), got: \(queue.render())")
+        precondition(qlines2.contains { $0.contains("firefox") && $0.contains("7.7MB/161.3MB") },
+                     "firefox row must show the latest bytes: \(queue.render())")
+        print("PASS: terminal emulator (CR/CHA rewrite, erase-line, multi-line parallel redraw, CRLF + SGR check mark, non-PTY LF normalization, whole-frame queue, scrollback)")
 
         // AppUpdate (Phase 1): version parsing + strictly-newer comparison, tag normalization.
         precondition(AppUpdate.versionComponents("v1.26") == [1, 26])
