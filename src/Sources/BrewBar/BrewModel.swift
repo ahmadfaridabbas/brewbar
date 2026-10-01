@@ -148,6 +148,13 @@ struct BrewAction: Identifiable {
     /// matches Terminal.app — in particular, the parallel download queue's multi-line in-place redraw
     /// collapses onto one block instead of stacking/garbling. See TerminalEmulator for the details.
     private var terminal = TerminalEmulator()
+    /// Whether the current command runs under a PTY. On a PTY, brew performs real in-place redraws
+    /// (the download queue moves the cursor up/to-col-0), so the emulator must honour LF's
+    /// column-preserving behaviour. On a plain pipe (JSON captures: outdated/info/search) brew emits
+    /// progressive plain lines expecting each to start at column 0 and never issues a carriage
+    /// return — so we normalise bare LF to CR+LF before feeding the emulator, keeping those lines at
+    /// the left margin instead of inheriting the previous line's stale column.
+    private var usingPTY = false
 
     init(prepareOnLaunch: Bool = true) { if prepareOnLaunch { prepare() } }
 
@@ -211,6 +218,7 @@ struct BrewAction: Identifiable {
         if preserveOutput { append("\r\n" + heading) } else { terminal.reset(); setOutput(heading) }
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Homebrew maintenance")
         let process = CommandRunner(); runner = process
+        usingPTY = standardOutputFile == nil
         outputTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.flush() }
         }
@@ -466,7 +474,16 @@ struct BrewAction: Identifiable {
         // so the parallel download queue's multi-line redraw collapses onto one block, matching a
         // real terminal. (Previously flush pre-translated `ESC[0G`→CR and stripped the rest, which
         // discarded the cursor-up and let multi-item frames stack/garble.)
-        append(text)
+        //
+        // On a plain pipe (JSON captures: outdated/info/search — no PTY) brew does NOT do in-place
+        // redraws and never issues a carriage return; it just prints progressive lines (e.g. the
+        // `==> Auto-updating Homebrew…` / `==> Auto-updated Homebrew!` preamble) each meant to start
+        // at column 0. Because a bare LF preserves the column in a faithful terminal, those lines
+        // would otherwise inherit the previous line's stale column and stair-step to the right. So
+        // for the non-PTY path, turn each bare LF into CR+LF (CR first resets to column 0) before
+        // feeding the emulator. Existing CRs are untouched (we don't double a CR already present).
+        let feed = usingPTY ? text : Self.normalizeLineBreaks(text)
+        append(feed)
         // The structured live-download block (DownloadProgressParser) wants clean, control-free
         // lines. Strip ANSI and normalise CR/CUP to newlines for the parser's input only — the
         // console mirror above keeps brew's exact in-place rendering.
@@ -637,6 +654,22 @@ struct BrewAction: Identifiable {
         if terminal.trim(toUTF8: limit) { truncated = true }
         output = terminal.render()
     }
+    /// Turn every bare line feed into CR+LF so each line starts at column 0 when fed to the terminal
+    /// emulator. Used only for the non-PTY (plain-pipe) path, where brew prints progressive plain
+    /// lines with no carriage returns of its own. A `\r` already preceding a `\n` is preserved (we do
+    /// not insert a second CR); a lone `\r` (none of brew's non-PTY output emits these, but be
+    /// safe) is left as-is. Pure/static so it can be unit-tested without a model instance.
+    static func normalizeLineBreaks(_ text: String) -> String {
+        var result = String()
+        result.reserveCapacity(text.count + 8)
+        var previous: Character? = nil
+        for ch in text {
+            if ch == "\n" && previous != "\r" { result.append("\r") }
+            result.append(ch)
+            previous = ch
+        }
+        return result
+    }
     /// Replace the console contents outright (a command heading, an error line, or a clear). Keeps the
     /// emulator's cursor consistent with the visible text so a following live redraw lands correctly.
     private func setOutput(_ text: String) {
@@ -738,7 +771,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.2"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.3"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }
@@ -975,10 +1008,18 @@ struct BrewAction: Identifiable {
         let bundlePath = Bundle.main.bundlePath
         let stamp = Date().formatted(date: .omitted, time: .standard)
         var text = "[\(stamp)] Checking for BrewBar updates…\n"
-        text += "  Current version: \(current) (build \(build))\n"
-        text += "  Bundle ID:       \(identifier)\n"
-        text += "  Location:        \(bundlePath)\n"
-        text += "  macOS:           \(os)\n"
+        // Align the values in a fixed column by padding each label to the width of the longest one,
+        // rather than hand-typed spaces (which previously left "Current version:" one column off
+        // from the others). `padLabel` right-pads to `labelWidth`, so every value starts at the same
+        // column regardless of label length.
+        let labelWidth = 16  // length of the longest label ("Current version:")
+        func row(_ label: String, _ value: String) -> String {
+            "  " + label.padding(toLength: labelWidth, withPad: " ", startingAt: 0) + " \(value)\n"
+        }
+        text += row("Current version:", "\(current) (build \(build))")
+        text += row("Bundle ID:", identifier)
+        text += row("Location:", bundlePath)
+        text += row("macOS:", os)
         append(text)
     }
 

@@ -189,6 +189,18 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.28.3: Non-PTY console lines and About-info columns no longer indented
+
+A follow-up to the 1.28.x terminal-fidelity line, fixing two remaining alignment bugs reported from console screenshots.
+
+**Bug 1 — brew's non-PTY preamble stair-stepped to the right.** The JSON commands (`brew outdated --json=v2`, `brew info`, `brew search`) run on a plain pipe, not a PTY. On that path brew prints progressive plain lines with no carriage returns — e.g. its auto-update preamble `==> Auto-updating Homebrew...` / `==> Auto-updated Homebrew!` / `==> Updated Homebrew from …`. Because the 1.28 terminal fix makes a bare line feed correctly *preserve* the column (as a real terminal does for the PTY download queue), each of these plain lines inherited the previous line's stale column and marched to the right.
+
+**Fix.** The model now tracks whether a command runs under a PTY (`usingPTY`). For the non-PTY path, `flush` normalises every bare line feed to `\r\n` (via a pure `normalizeLineBreaks` helper) before feeding the terminal emulator, so each line resets to column 0 — matching how a dumb pipe consumer prints brew's output. The PTY path (download queue, with real in-place cursor redraws) is untouched, so that fidelity is preserved. Added three regression tests: the pure helper transform, an emulator-level reproduction (raw bare-LF stair-steps; CRLF fixes it), and an end-to-end `checkUpdates` test driving a fake brew that writes an `==>` preamble to stderr — reverting the fix reproduces the exact right-indent symptom.
+
+**Bug 2 — About-info columns misaligned.** The manual update-check header (`Current version:` / `Bundle ID:` / `Location:` / `macOS:`) aligned its values with hand-typed spaces, which left `Current version:` one column off from the other three. Replaced the literal padding with programmatic label padding (each label padded to a fixed width), so every value starts at the same column and the alignment can't drift when labels change.
+
+Optimized arm64 build verified; the built bundle reports version 1.28.3 (build 35). All 24 test suites pass.
+
 ## Version 1.28.2: Console summary lines no longer indented
 
 A follow-up to 1.28.1. The status footer line was fixed in 1.28.1, but the app's own result-summary lines that are appended *after* it still inherited the stale cursor column, so they rendered indented far to the right. Visible as "Loaded N installed Homebrew packages." (Installed), "N available updates in current definitions." (Updates), "Found N installable packages for …" (Search), and — when a chained command re-ran with the previous log preserved — a duplicate command heading pushed to the right.

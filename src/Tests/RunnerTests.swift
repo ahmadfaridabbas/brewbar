@@ -252,7 +252,29 @@ import Darwin
         checkLine.feed("\(ESC)[32m✔\u{FE0E}\(ESC)[0m Cask clipy (1.3.0)\r\n\(ESC)[K")
         precondition(checkLine.render().split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) == "✔\u{FE0E} Cask clipy (1.3.0)",
                      "completion line must be clean (no SGR residue, no padding): '\(checkLine.render())'")
-        print("PASS: terminal emulator (CR/CHA rewrite, erase-line, multi-line parallel redraw, CRLF + SGR check mark, scrollback)")
+        // NON-PTY REGRESSION: brew's JSON commands (outdated/info/search) run on a PLAIN PIPE, where
+        // brew prints its auto-update preamble as progressive bare-LF lines with NO carriage return
+        // ("==> Auto-updating Homebrew...\n==> Auto-updated Homebrew!\n"). A faithful terminal
+        // PRESERVES the column across a bare LF, so fed raw these lines stair-step to the right
+        // (the observed bug). The fix normalises bare LF → CR+LF for the non-PTY path. First prove
+        // the raw bug exists, then prove normalisation fixes it (both at the emulator level so the
+        // test is independent of BrewModel).
+        let preamble = "==> Auto-updating Homebrew...\n==> Auto-updated Homebrew!\n==> Updated Homebrew from a to b.\n"
+        var rawPTY = TerminalEmulator()
+        rawPTY.feed(preamble)   // raw bare-LF, as if mis-fed on the non-PTY path
+        let rawLines = rawPTY.render().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        precondition(rawLines[1].hasPrefix("          "),
+                     "sanity: raw bare-LF SHOULD stair-step (bug reproduced): '\(rawLines[1])'")
+        var normalized = TerminalEmulator()
+        // CR+LF normalisation (what BrewModel.normalizeLineBreaks produces for the non-PTY path).
+        normalized.feed(preamble.replacingOccurrences(of: "\n", with: "\r\n"))
+        let normLines = normalized.render().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        precondition(normLines[0] == "==> Auto-updating Homebrew...", "norm row 0: '\(normLines[0])'")
+        precondition(normLines[1] == "==> Auto-updated Homebrew!",
+                     "non-PTY row 1 must start at col 0, not stair-step: '\(normLines[1])'")
+        precondition(normLines[2] == "==> Updated Homebrew from a to b.",
+                     "non-PTY row 2 must start at col 0: '\(normLines[2])'")
+        print("PASS: terminal emulator (CR/CHA rewrite, erase-line, multi-line parallel redraw, CRLF + SGR check mark, non-PTY LF normalization, scrollback)")
 
         // AppUpdate (Phase 1): version parsing + strictly-newer comparison, tag normalization.
         precondition(AppUpdate.versionComponents("v1.26") == [1, 26])

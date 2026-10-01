@@ -351,6 +351,55 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         pump { !model.busy }
         precondition(model.updateCount == 1, "checkUpdates should set updateCount from results: \(model.updateCount)")
         print("PASS: updateCount reflects the latest outdated check")
+
+        // normalizeLineBreaks (non-PTY stair-step fix): bare LF becomes CR+LF so each line starts at
+        // column 0, while an existing CRLF is NOT doubled and a lone CR is left intact. (This is what
+        // flush applies to the plain-pipe path so brew's `==> Auto-updating…` preamble stops marching
+        // right.) Pure/static — assert the exact transformation.
+        precondition(BrewModel.normalizeLineBreaks("a\nb\nc") == "a\r\nb\r\nc", "bare LF must gain a CR")
+        precondition(BrewModel.normalizeLineBreaks("a\r\nb") == "a\r\nb", "existing CRLF must not be doubled")
+        precondition(BrewModel.normalizeLineBreaks("a\rb") == "a\rb", "lone CR must be left intact")
+        precondition(BrewModel.normalizeLineBreaks("") == "", "empty input stays empty")
+        // End-to-end: feed brew's real non-PTY preamble through the emulator the way flush does for a
+        // JSON command (bare LF normalised). Every `==>` line must sit at column 0 (no stair-step).
+        var nonpty = TerminalEmulator()
+        nonpty.feed(BrewModel.normalizeLineBreaks("==> Auto-updating Homebrew...\n==> Auto-updated Homebrew!\n==> Updated Homebrew from a to b.\n"))
+        let nonptyLines = nonpty.render().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        precondition(nonptyLines[1] == "==> Auto-updated Homebrew!",
+                     "non-PTY preamble row 1 must start at col 0: '\(nonptyLines[1])'")
+        precondition(nonptyLines[2] == "==> Updated Homebrew from a to b.",
+                     "non-PTY preamble row 2 must start at col 0: '\(nonptyLines[2])'")
+        print("PASS: non-PTY line-break normalization keeps brew's plain-pipe lines at column 0")
+
+        // FLUSH-LEVEL non-PTY regression (the actual screenshot bug): checkUpdates runs
+        // `brew outdated --json=v2` with a standardOutputFile, so usingPTY=false. brew's auto-update
+        // preamble goes to STDERR (→ console) as progressive bare-LF lines while the JSON goes to
+        // STDOUT (→ the capture file). Those `==>` lines must land at column 0, not stair-step. This
+        // drives the real flush() path end-to-end (not just the pure helper).
+        let preambleBrew = folder.appendingPathComponent("preamble-brew")
+        try """
+        #!/bin/sh
+        printf '==> Auto-updating Homebrew...\\n' >&2
+        printf '==> Auto-updated Homebrew!\\n' >&2
+        printf '==> Updated Homebrew from a to b.\\n' >&2
+        printf '%s' '{"formulae":[],"casks":[]}'
+        exit 0
+        """.write(to: preambleBrew, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: preambleBrew.path)
+        model.brewPath = preambleBrew.path
+        model.checkUpdates()
+        pump { !model.busy && !model.checkingUpdates }
+        let consoleLines = model.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let autoUpdated = consoleLines.first { $0.contains("Auto-updated Homebrew!") } ?? ""
+        let updatedFrom = consoleLines.first { $0.contains("Updated Homebrew from") } ?? ""
+        precondition(autoUpdated == "==> Auto-updated Homebrew!",
+                     "non-PTY preamble line must start at col 0 via flush, got: '\(autoUpdated)'")
+        precondition(updatedFrom == "==> Updated Homebrew from a to b.",
+                     "non-PTY preamble line must start at col 0 via flush, got: '\(updatedFrom)'")
+        model.brewPath = fixture.path
+        print("PASS: non-PTY flush path keeps brew's stderr `==>` preamble at column 0")
+
+        print("PASS: UninstallTests")
     }
     static func pump(_ done: () -> Bool) {
         let end = Date().addingTimeInterval(12)
