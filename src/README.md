@@ -189,6 +189,16 @@ Implementation: a new AppKit-free `DownloadProgress` model + `DownloadProgressPa
 
 Optimized arm64 build verified; the built bundle reports version 1.16 (build 18).
 
+## Version 1.28.2: Console summary lines no longer indented
+
+A follow-up to 1.28.1. The status footer line was fixed in 1.28.1, but the app's own result-summary lines that are appended *after* it still inherited the stale cursor column, so they rendered indented far to the right. Visible as "Loaded N installed Homebrew packages." (Installed), "N available updates in current definitions." (Updates), "Found N installable packages for …" (Search), and — when a chained command re-ran with the previous log preserved — a duplicate command heading pushed to the right.
+
+**Cause.** Same class as 1.28.1. The completion status line ends with a bare line feed, which (correctly, per the 1.28 terminal fix) preserves the column — leaving the emulator cursor parked at that line's stale column. Every synthetic summary line appended afterward, and the `preserveOutput` chained-command heading (appended as `"\n" + heading`), began at that stale column instead of column 0.
+
+**Fix.** Each synthetic summary append now starts with a carriage return (`\r…`), and the `preserveOutput` heading separator is now `\r\n` instead of `\n`, resetting the column to 0 so every line starts at the left margin. Added a regression test (the `checkUpdates` path) asserting the "N available updates" summary line begins at column 0; reverting the fix reproduces the exact right-indent symptom.
+
+Optimized arm64 build verified; the built bundle reports version 1.28.2 (build 34). All 22 test suites pass.
+
 ## Version 1.28.1: Console status line no longer indented
 
 A follow-up to 1.28. After a command finished, the synthetic status footer line (e.g. `[2:28 AM] Succeeded · Exit 0`) could appear indented far to the right instead of starting at the left margin — most visible after `brew outdated` when nothing is outdated.

@@ -1,1 +1,1 @@
-8adb6feafcf147c101f38e1d0fd54486600eb7ae16046a9b4cf63ef389393f0f  BrewBar-1.28.1.zip
+49de6c98930e480fbedbdc699294f6ae7bbb045eecf8ce6bd05453681a724bff  BrewBar-1.28.2.zip

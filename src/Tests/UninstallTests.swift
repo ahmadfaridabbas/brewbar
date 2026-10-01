@@ -118,6 +118,34 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
                      "Status line must not be indented to brew's stale cursor column: '\(statusLine)'")
         print("PASS: completion status line starts at column 0 even when brew output has no trailing newline")
 
+        // Synthetic SUMMARY line column reset (regression for v1.28.2): after a command finishes,
+        // the completion handler appends the "[time] Succeeded · Exit 0\n" status line. A bare LF
+        // preserves the column (correct terminal behaviour), so the emulator cursor is now parked at
+        // that line's stale column. The app's own result-summary line that follows (e.g. checkUpdates'
+        // "N available updates in current definitions.") must reset to column 0 with a leading CR,
+        // not inherit the stale column. (Regression for the screenshots where "0 available updates…",
+        // "Loaded N installed Homebrew packages.", and "Found N installable packages…" were pushed
+        // far to the right.)
+        let updatesFixture = folder.appendingPathComponent("updates-brew")
+        try """
+        #!/bin/sh
+        printf '%s' '{"formulae":[],"casks":[]}'
+        exit 0
+        """.write(to: updatesFixture, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: updatesFixture.path)
+        model.brewPath = updatesFixture.path
+        model.checkUpdates()
+        pump { !model.busy && !model.checkingUpdates }
+        let summaryLine = model.output.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init).first { $0.contains("available updates in current definitions.") } ?? ""
+        precondition(!summaryLine.isEmpty, "Expected the 'available updates' summary line in the console")
+        precondition(summaryLine.hasPrefix("0 available updates"),
+                     "Summary line must start at column 0, got: '\(summaryLine)'")
+        precondition(!summaryLine.hasPrefix(" "),
+                     "Summary line must not be indented to the status line's stale cursor column: '\(summaryLine)'")
+        model.brewPath = fixture.path
+        print("PASS: synthetic summary line starts at column 0 after the completion status line")
+
         // Interactive [y/n] prompt: a fake brew that prints the ask-mode prompt then reads one char
         // from its TTY. The model must arm awaitingInput on the prompt line, answering "y" must let
         // it proceed to exit 0, and the prompt must NOT re-arm on the echoed answer / later output.

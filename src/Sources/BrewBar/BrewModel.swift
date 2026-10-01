@@ -203,7 +203,12 @@ struct BrewAction: Identifiable {
         started = Date(); finished = nil; command = "brew " + arguments.joined(separator: " "); status = "Running"
         pending.removeAll(); truncated = false
         let heading = "[\(Date().formatted(date: .omitted, time: .standard))] $ \(command)\n"
-        if preserveOutput { append("\n" + heading) } else { terminal.reset(); setOutput(heading) }
+        // When preserving the previous log (a chained command: search→info, upgrade→recheck, etc.)
+        // the heading is appended after the prior command's status line, whose trailing `\n` leaves
+        // the cursor at that line's stale column (a bare LF preserves the column — correct terminal
+        // behaviour, see TerminalEmulator). Prefix the blank-line separator with CR so the heading
+        // starts at column 0 instead of being indented to the stale column.
+        if preserveOutput { append("\r\n" + heading) } else { terminal.reset(); setOutput(heading) }
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Homebrew maintenance")
         let process = CommandRunner(); runner = process
         outputTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -267,12 +272,12 @@ struct BrewAction: Identifiable {
             do {
                 self.packages = try InstalledPackage.parse(Data(contentsOf: file))
                 self.inventoryLoaded = true; self.inventoryStale = false
-                self.append("Loaded \(self.packages.count) installed Homebrew packages.\n")
+                self.append("\rLoaded \(self.packages.count) installed Homebrew packages.\n")
             } catch {
                 self.failed = true; self.status = "Could not read packages"
                 self.inventoryError = "Homebrew returned an unreadable package list. Try Refresh."
                 self.inventoryStale = true
-                self.append("Could not decode package list: \(error.localizedDescription)\n")
+                self.append("\rCould not decode package list: \(error.localizedDescription)\n")
             }
         }
     }
@@ -346,7 +351,7 @@ struct BrewAction: Identifiable {
                 // too strict (e.g. the display name differs from the token), fall back to all results.
                 self.searchResults = filtered.isEmpty ? all : filtered
                 if self.searchResults.isEmpty { self.searchError = "No installable formula or cask found for “\(query)”." }
-                self.append("Found \(self.searchResults.count) installable packages for “\(query)”.\n")
+                self.append("\rFound \(self.searchResults.count) installable packages for “\(query)”.\n")
             } catch {
                 self.searchError = "Homebrew returned unreadable search details. Try again."
             }
@@ -392,7 +397,7 @@ struct BrewAction: Identifiable {
                 self.updates = try PackageUpdate.parse(Data(contentsOf: file))
                 self.updatesLoaded = true; self.updatesStale = false; self.updatesChecked = Date()
                 self.updateCount = self.updates.count
-                self.append("\(self.updates.count) available updates in current definitions.\n")
+                self.append("\r\(self.updates.count) available updates in current definitions.\n")
             } catch {
                 self.updatesError = "Could not read Homebrew update data. Retry the check."
                 self.updatesStale = true; self.failed = true; self.status = "Update data error"
@@ -733,7 +738,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.1"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.28.2"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }
@@ -1044,7 +1049,7 @@ struct BrewAction: Identifiable {
         // pass `--describe` because current Homebrew (7+) removed that switch and rejects it.
         execute(arguments: Self.brewfileDumpArguments(path: url.path)) { [weak self] code, cancelled in
             guard let self = self else { return }
-            if code == 0 && !cancelled { self.append("Brewfile saved to \(url.path)\n") }
+            if code == 0 && !cancelled { self.append("\rBrewfile saved to \(url.path)\n") }
         }
     }
 
@@ -1073,7 +1078,7 @@ struct BrewAction: Identifiable {
             guard let self = self else { return }
             // A restore can install/upgrade many packages; everything is now stale.
             self.inventoryStale = true; self.updatesStale = true
-            if code == 0 && !cancelled { self.append("Brewfile restore complete.\n") }
+            if code == 0 && !cancelled { self.append("\rBrewfile restore complete.\n") }
         }
     }
 
