@@ -855,6 +855,28 @@ struct BrewAction: Identifiable {
         }
         infoTarget = id; packageInfo = nil; infoError = nil; infoLoading = true
         let flag = kind == "App" ? "--cask" : "--formula"
+        // First, run a VISIBLE plain `brew info <flag> <token>` so the human-readable detail (the
+        // same text you'd see in Terminal — description, homepage, install state, artifacts,
+        // analytics) streams into the console. Then chain the quiet JSON capture that fills the
+        // popover. Chaining is safe because `execute` sets `busy = false` before calling this
+        // completion (the search→info chain relies on the same invariant).
+        execute(arguments: ["info", flag, token]) { [weak self] _, cancelled in
+            guard let self = self else { return }
+            // If the user closed/changed the popover meanwhile, don't bother with the JSON fetch.
+            guard self.infoTarget == id, !cancelled else {
+                if cancelled && self.infoTarget == id { self.infoLoading = false; self.infoError = "Cancelled." }
+                return
+            }
+            self.loadInfoDetail(token: token, flag: flag, id: id)
+        }
+    }
+
+    /// Quiet JSON capture (`brew info --json=v2 <flag> <token>` to a temp file, no console spam)
+    /// that parses one `PackageInfo` to fill the popover. Chained after the visible plain-text run
+    /// in `fetchInfo` so the console shows the Terminal-style detail while the popover still gets
+    /// its structured fields. `preserveOutput: true` keeps the plain-text info visible in the log.
+    private func loadInfoDetail(token: String, flag: String, id: String) {
+        guard ready, !busy else { infoLoading = false; return }
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("BrewBar-pkginfo-\(UUID().uuidString).json")
         execute(arguments: ["info", "--json=v2", flag, token], standardOutputFile: file, preserveOutput: true) { [weak self] code, cancelled in
             defer { try? FileManager.default.removeItem(at: file) }
@@ -939,7 +961,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.30"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.0"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }

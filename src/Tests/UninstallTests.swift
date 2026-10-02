@@ -322,8 +322,11 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         model.brewPath = infoBrew.path
         model.fetchInfo(token: "wget", kind: "Formula", id: "Formula:wget")
         precondition(model.infoTarget == "Formula:wget" && model.infoLoading, "fetchInfo arms target + loading immediately")
-        pump { !model.busy }
+        pump { !model.busy && !model.infoLoading }
         precondition(!model.infoLoading, "info loading clears when done")
+        // The ⓘ click now runs a VISIBLE plain `brew info --formula wget` into the console (the
+        // Terminal-style detail) and then chains the quiet JSON capture that fills the popover.
+        precondition(model.output.contains("brew info --formula wget"), "plain `brew info` must run visibly in the console: \(model.output)")
         precondition(model.packageInfo?.name == "wget", "packageInfo should be populated: \(String(describing: model.packageInfo))")
         precondition(model.packageInfo?.installSize == "2.0 MB" && model.packageInfo?.dependencies == ["openssl@3"], "info fields parsed")
         // dismissInfo clears everything.

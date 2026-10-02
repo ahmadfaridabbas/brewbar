@@ -211,6 +211,18 @@ Fixes a color inconsistency in the console's live multi-download block. When a d
 
 Optimized arm64 build verified; the built bundle reports version 1.30 (build 39). All 32 test suites pass.
 
+## Version 2.0: Info button runs a visible `brew info` in the console
+
+Clicking the ⓘ info button on a Search & Install (or Installed / Updates) row now runs a **visible, human-readable `brew info <token>`** into BrewBar's console — the same formatted detail you'd see in Terminal (description, homepage, install state, Caskroom path/size, requirements, artifacts, and analytics) — in addition to the structured popover.
+
+**Behavior.** Previously the ⓘ button ran only a quiet `brew info --json=v2 <token>` captured to a temp file (so the console stayed silent) and parsed the JSON into the popover. Now the click first runs a plain `brew info <--cask|--formula> <token>` that streams the Terminal-style text into the console, then **chains** the quiet JSON capture (`preserveOutput: true`, so the plain text stays visible) to fill the popover's structured fields. You get both: the rich inline detail in the console *and* the compact popover with the "Open homepage" link.
+
+**Implementation.** `BrewModel.fetchInfo(token:kind:id:)` now runs the visible plain command and, in its completion, calls a new private `loadInfoDetail(token:flag:id:)` that performs the JSON capture + `PackageInfo.parse`. Chaining is safe because `execute` sets `busy = false` before invoking the completion (the same invariant the search→info chain relies on). The token is still validated against a strict `^[A-Za-z0-9][A-Za-z0-9@+._/-]*$` pattern and passed as a fixed argument (no shell interpolation), and the popover's cancel/dismiss/invalid-token guards are preserved. If the user closes or switches the popover between the two commands, the JSON fetch is skipped.
+
+**Tests.** The existing `fetchInfo` regression (UninstallTests) was extended to assert the visible plain `brew info --formula wget` command appears in the console output *and* that `packageInfo` is still populated from the chained JSON capture; all other guards (arms target + loading immediately, dismiss clears state, invalid token rejected) unchanged.
+
+Optimized arm64 build verified; the built bundle reports version 2.0 (build 40). All test suites pass.
+
 ## Version 1.28.5: Multi-download console no longer garbles (flush chunk-boundary fix)
 
 Fixes the long-standing multi-item download garble that resurfaced on real `brew upgrade` with two concurrent casks (e.g. firefox + google-chrome): the live download block drifted and left a trail of stale rows, byte counters broke onto their own lines, and `· name — X MB / Y MB` snapshot lines leaked into the scrollback mid-download.
