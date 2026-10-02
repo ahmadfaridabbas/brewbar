@@ -1,0 +1,22 @@
+# Netlify configuration for the BrewBar website.
+# The site is a static site; its root is the repo's docs/ folder
+# (same files previously served by GitHub Pages).
+
+[build]
+  # No build step — the site is plain static HTML/CSS/JS.
+  publish = "docs"
+
+[build.processing]
+  skip_processing = true
+
+# Long-cache the immutable asset images; keep HTML/sitemap/robots short so
+# content changes (e.g. a new release) are picked up quickly.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/downloads/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"

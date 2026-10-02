@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ahmadfaridabbas.github.io/brewbar/sitemap.xml
+Sitemap: https://brewbar.netlify.app/sitemap.xml
