@@ -62,10 +62,15 @@ Gallery images are native offscreen renders of BrewBar's interface, produced fro
 ## Install
 
 1. Download and extract [BrewBar-2.1.zip](docs/downloads/BrewBar-2.1.zip).
-2. Drag `BrewBar.app` to Applications, then right-click → Open the first time.
-3. Click the Terminal Mug glyph in the menu bar to open the panel.
+2. Drag `BrewBar.app` to your Applications folder.
+3. Because BrewBar is open source and not notarized by Apple, macOS quarantines it on download. Run this once in Terminal to let it launch:
 
-This is a locally (ad-hoc) signed build, not Apple-notarized. macOS may ask you to approve it in Privacy & Security. BrewBar requires an existing Homebrew installation at `/opt/homebrew`.
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/BrewBar.app
+   ```
+4. Click the Terminal Mug glyph in the menu bar to open the panel.
+
+This is a locally (ad-hoc) signed build, not Apple-notarized. The command above clears macOS's quarantine flag so the app opens cleanly; alternatively you can right-click → Open the first time or approve it in Privacy & Security. BrewBar requires an existing Homebrew installation at `/opt/homebrew`.
 
 ## Publishing
 
