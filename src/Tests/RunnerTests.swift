@@ -126,6 +126,19 @@ import Darwin
         precondition(parse("==> Downloading from https://mirror.example.com/file.zip") == .none)
         // brew's API cache preamble must not be treated as a file download.
         precondition(parse("==> Downloading Homebrew API data") == .none)
+        // brew's cask/formula METADATA JSON (fetched during `brew info`) must not pop the download
+        // block — it's a tiny definition file, not a package artifact.
+        precondition(parse("==> Downloading https://formulae.brew.sh/api/cask/alt-tab.json") == .none,
+                     "API cask metadata should not start a download")
+        precondition(parse("==> Downloading https://formulae.brew.sh/api/formula/wget.json") == .none,
+                     "API formula metadata should not start a download")
+        precondition(DownloadProgressParser.isAPIMetadataURL("https://formulae.brew.sh/api/cask/alt-tab.json"))
+        precondition(DownloadProgressParser.isAPIMetadataURL("https://formulae.brew.sh/api/formula/wget.json"))
+        // A real artifact (different host) that merely ends in .json is NOT suppressed.
+        precondition(!DownloadProgressParser.isAPIMetadataURL("https://example.com/releases/thing.json"))
+        if case .start = parse("==> Downloading https://example.com/releases/thing.json") {} else {
+            preconditionFailure("A non-API .json artifact should still start a download")
+        }
         // Progress frames.
         precondition(parse("####                                                                       6.8%") == .progress(fraction: 0.068))
         precondition(parse("################################                                          45.1%") == .progress(fraction: 0.451))

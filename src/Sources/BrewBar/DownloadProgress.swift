@@ -131,6 +131,11 @@ enum DownloadProgressParser {
             if rest.hasPrefix("from ") { return .none }
             if rest == "Homebrew API data" || rest.hasPrefix("Homebrew API") { return .none }
             guard rest.lowercased().hasPrefix("http") else { return .none }
+            // Ignore brew's cask/formula METADATA fetch (e.g. `brew info --cask alt-tab` pulls
+            // `https://formulae.brew.sh/api/cask/alt-tab.json`). It's a tiny definition file, not a
+            // package artifact, so it shouldn't pop the live-download block — same spirit as the
+            // "Homebrew API data" filter above.
+            if isAPIMetadataURL(rest) { return .none }
             return .start(url: rest, fileName: fileName(fromURL: rest))
         }
 
@@ -177,6 +182,17 @@ enum DownloadProgressParser {
         if line.hasPrefix("==>") { return .finish }
 
         return .none
+    }
+
+    /// True when the URL is brew's cask/formula definition metadata (e.g.
+    /// `https://formulae.brew.sh/api/cask/alt-tab.json` or `.../api/formula/wget.json`) rather than
+    /// a package artifact. These are fetched during read-only commands like `brew info` and should
+    /// not trigger the live-download block. Matched narrowly on host + `/api/…json` so a real
+    /// artifact that merely happens to be a `.json` isn't suppressed.
+    static func isAPIMetadataURL(_ url: String) -> Bool {
+        guard let comps = URLComponents(string: url) else { return false }
+        guard let host = comps.host, host == "formulae.brew.sh" else { return false }
+        return comps.path.hasPrefix("/api/") && comps.path.hasSuffix(".json")
     }
 
     /// Derive a readable file name from a download URL, stripping query strings and percent-escapes.

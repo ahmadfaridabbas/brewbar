@@ -223,6 +223,16 @@ Clicking the ⓘ info button on a Search & Install (or Installed / Updates) row 
 
 Optimized arm64 build verified; the built bundle reports version 2.0 (build 40). All test suites pass.
 
+## Version 2.0.1: `brew info` metadata fetch no longer pops the download bar
+
+A follow-up to 2.0. Clicking ⓘ runs a visible `brew info <token>`, and that command fetches Homebrew's cask/formula definition from the API (e.g. `==> Downloading https://formulae.brew.sh/api/cask/alt-tab.json`). BrewBar's live-download detector saw that `==> Downloading <url>` line and briefly popped the "Downloading 1 item" progress block for the tiny JSON definition file — noise for what is only a read-only info lookup.
+
+**Fix.** `DownloadProgressParser.parse` now ignores a `==> Downloading` line whose URL is brew's API metadata — a new `isAPIMetadataURL` helper matches host `formulae.brew.sh` with an `/api/…` path ending in `.json` and returns `.none`, in the same spirit as the existing `Downloading Homebrew API data` filter. The match is narrow (host + `/api/…json`) so a real package artifact that merely happens to be a `.json` on another host still starts a normal download.
+
+**Tests.** RunnerTests gained assertions that the cask and formula API metadata URLs (`/api/cask/alt-tab.json`, `/api/formula/wget.json`) return `.none`, that `isAPIMetadataURL` is true for those and false for a non-API `.json` artifact, and that a non-API `.json` URL still starts a download.
+
+Optimized arm64 build verified; the built bundle reports version 2.0.1 (build 41). All test suites pass.
+
 ## Version 1.28.5: Multi-download console no longer garbles (flush chunk-boundary fix)
 
 Fixes the long-standing multi-item download garble that resurfaced on real `brew upgrade` with two concurrent casks (e.g. firefox + google-chrome): the live download block drifted and left a trail of stale rows, byte counters broke onto their own lines, and `· name — X MB / Y MB` snapshot lines leaked into the scrollback mid-download.
