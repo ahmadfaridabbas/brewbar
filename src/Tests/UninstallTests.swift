@@ -73,6 +73,15 @@ enum BrandImages { static func icon(dark: Bool) -> NSImage { NSImage(size: NSSiz
         model.searchResults = [newFormula, newCask, already]
         model.installCandidate = newFormula
         precondition(!model.busy)                          // selecting a candidate must not launch
+        // clearSearch() wipes the field + results + candidate back to the empty prompt (the ✕ clear
+        // button). Set a query first so the reset is meaningful.
+        model.searchQuery = "rip"; model.searchPerformed = true; model.searchError = "x"
+        model.clearSearch()
+        precondition(model.searchQuery.isEmpty && model.searchResults.isEmpty && !model.searchPerformed
+                     && model.searchError == nil && model.installCandidate == nil, "clearSearch resets all search state")
+        // Re-seed for the install-flow assertions below.
+        model.searchResults = [newFormula, newCask, already]
+        model.installCandidate = newFormula
         model.install(already)                             // already-installed guard: no launch
         precondition(!model.busy)
         model.install(newFormula)

@@ -29,6 +29,11 @@ struct InstalledView: View {
                 TextField("Search installed apps and formulae", text: $model.search).textFieldStyle(.plain)
                     .foregroundStyle(theme.text)
                     .accessibilityLabel("Search installed packages")
+                if !model.search.isEmpty {
+                    Button { model.search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).foregroundStyle(theme.secondaryText)
+                        .help("Clear search").accessibilityLabel("Clear search")
+                }
                 Button { model.refreshInstalled() } label: { Image(systemName: "arrow.clockwise") }
                     .disabled(model.busy || !model.ready).help("Refresh installed packages")
                     .accessibilityLabel("Refresh installed packages")
@@ -86,6 +91,11 @@ struct InstalledView: View {
                     .textFieldStyle(.plain).foregroundStyle(theme.text)
                     .onSubmit { model.searchPackages(model.searchQuery) }
                     .accessibilityLabel("Search Homebrew packages to install")
+                if !model.searchQuery.isEmpty {
+                    Button { model.clearSearch() } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).foregroundStyle(theme.secondaryText)
+                        .help("Clear search").accessibilityLabel("Clear search")
+                }
                 Button { model.searchPackages(model.searchQuery) } label: { Image(systemName: "return") }
                     .disabled(model.busy || !model.ready).help("Search Homebrew")
                     .accessibilityLabel("Run search")

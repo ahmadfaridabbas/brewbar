@@ -345,6 +345,11 @@ struct BrewAction: Identifiable {
     /// result shows a description, version, kind, and whether it is already installed. Two chained
     /// commands: the info call is issued from the search completion (busy is clear again by then).
     private let searchResultLimit = 40
+    /// Clear the Search & Install field and reset its results back to the empty prompt. Used by the
+    /// field's ✕ clear button. Leaves any pending install confirmation dismissed too.
+    func clearSearch() {
+        searchQuery = ""; searchResults = []; searchError = nil; searchPerformed = false; installCandidate = nil
+    }
     func searchPackages(_ rawQuery: String) {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard ready, !busy, query.count >= 2,
@@ -961,7 +966,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.0.1"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.1"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }

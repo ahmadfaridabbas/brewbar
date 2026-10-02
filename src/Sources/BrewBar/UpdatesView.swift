@@ -7,6 +7,11 @@ struct UpdatesView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 TextField("Search updates", text: $model.updateSearch).textFieldStyle(.roundedBorder)
+                if !model.updateSearch.isEmpty {
+                    Button { model.updateSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).foregroundStyle(theme.secondaryText)
+                        .help("Clear search").accessibilityLabel("Clear search")
+                }
                 Button("Check") { model.checkUpdates() }.help("Check current Homebrew definitions")
                 Button("Refresh definitions") { model.refreshDefinitions() }.help("Fetch current definitions, then check for updates")
             }.disabled(model.busy || !model.ready)

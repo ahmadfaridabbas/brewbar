@@ -233,6 +233,16 @@ A follow-up to 2.0. Clicking ⓘ runs a visible `brew info <token>`, and that co
 
 Optimized arm64 build verified; the built bundle reports version 2.0.1 (build 41). All test suites pass.
 
+## Version 2.1: Clear (✕) button on search fields
+
+Every search field in the app now has a **✕ clear button** that appears only when the field has text and wipes it in one click. Added to all three text inputs: **Search & Install** (clears the query *and* resets the results back to the empty prompt, dismissing any pending install confirmation), the **Installed** filter (clears the filter so the full inventory shows again), and the **Updates** search filter. The ✕ sits inline at the trailing edge of each field, styled with the app's secondary text color and a standard `xmark.circle.fill` glyph, with a "Clear search" accessibility label and tooltip. The password `SecureField` is intentionally left untouched (it already has Submit/Cancel, and a clear control there would be unusual).
+
+**Implementation.** A new `BrewModel.clearSearch()` resets `searchQuery`, `searchResults`, `searchError`, `searchPerformed`, and `installCandidate` for the Search & Install field; the two filter fields clear their bound string directly (`model.search = ""` / `model.updateSearch = ""`), which restores the unfiltered list. Each ✕ is wrapped in an `if !field.isEmpty` so it only shows when there's text to clear.
+
+**Tests.** The install-flow regression (UninstallTests) now seeds a query + results + error + candidate, calls `clearSearch()`, and asserts every field is reset to empty before continuing with the install assertions.
+
+Optimized arm64 build verified; the built bundle reports version 2.1 (build 42). All test suites pass.
+
 ## Version 1.28.5: Multi-download console no longer garbles (flush chunk-boundary fix)
 
 Fixes the long-standing multi-item download garble that resurfaced on real `brew upgrade` with two concurrent casks (e.g. firefox + google-chrome): the live download block drifted and left a trail of stale rows, byte counters broke onto their own lines, and `· name — X MB / Y MB` snapshot lines leaked into the scrollback mid-download.

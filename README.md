@@ -61,7 +61,7 @@ Gallery images are native offscreen renders of BrewBar's interface, produced fro
 
 ## Install
 
-1. Download and extract [BrewBar-2.0.1.zip](docs/downloads/BrewBar-2.0.1.zip).
+1. Download and extract [BrewBar-2.1.zip](docs/downloads/BrewBar-2.1.zip).
 2. Drag `BrewBar.app` to Applications, then right-click → Open the first time.
 3. Click the Terminal Mug glyph in the menu bar to open the panel.
 
