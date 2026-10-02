@@ -939,7 +939,7 @@ struct BrewAction: Identifiable {
         var request = URLRequest(url: AppUpdate.latestReleaseAPI)
         request.timeoutInterval = 12
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.29"
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.30"
         // On a manual check, print the running build's details to the console so there's a visible
         // record of what's installed alongside the check result.
         if manual { logAppUpdateHeader(current: current) }

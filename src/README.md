@@ -201,6 +201,16 @@ Some casks (e.g. Zoom) ship a `.pkg` payload whose install/uninstall runs `/usr/
 
 Optimized arm64 build verified; the built bundle reports version 1.29 (build 38). All 32 test suites pass.
 
+## Version 1.30: Completed download bars always render green
+
+Fixes a color inconsistency in the console's live multi-download block. When a download finished **while the panel was open**, its progress bar turned green (correct); but if a download was *already complete* when the panel first rendered — for example after closing and reopening the app during a `brew upgrade` — that same bar rendered in the macOS system accent (blue) instead of green. So a single block could show a mix of green and blue "done" bars.
+
+**Root cause.** The rows used a SwiftUI `ProgressView(value:)` tinted with `.tint(entry.done ? .green : accent)`. A `ProgressView` that is *born full* (created already at `fraction == 1.0`) does not reliably pick up a `.tint` applied in the same render pass and falls back to the system accent color (blue). A bar that animates up to completion while live has its tint resolved before it fills, so it shows green — hence the live-vs-reopen discrepancy. The `downloads` array is in-memory only (not persisted), so this was purely a first-paint rendering quirk, not a state problem.
+
+**Fix.** Replaced the system `ProgressView` in `LiveDownloads` (`BrewBarApp.swift`) with an explicit capsule bar: a faint track plus a filled `Capsule` whose width is `geometry.width × fraction`, drawn directly in `entry.done ? .green : theme.accent`. Because the fill color is painted explicitly rather than via `.tint`, a completed bar is always green regardless of whether it finished live or was already complete at first paint. View-only change; all existing tests continue to pass.
+
+Optimized arm64 build verified; the built bundle reports version 1.30 (build 39). All 32 test suites pass.
+
 ## Version 1.28.5: Multi-download console no longer garbles (flush chunk-boundary fix)
 
 Fixes the long-standing multi-item download garble that resurfaced on real `brew upgrade` with two concurrent casks (e.g. firefox + google-chrome): the live download block drifted and left a trail of stale rows, byte counters broke onto their own lines, and `· name — X MB / Y MB` snapshot lines leaked into the scrollback mid-download.

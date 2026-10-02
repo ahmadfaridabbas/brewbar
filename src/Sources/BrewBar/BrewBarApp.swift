@@ -18,7 +18,7 @@ enum AppInfo {
     /// Marketing version (CFBundleShortVersionString), with build number when available.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.29"
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.30"
         if let build = info?["CFBundleVersion"] as? String, !build.isEmpty {
             return "Version \(short) (\(build))"
         }
@@ -606,10 +606,22 @@ struct LiveDownloads: View {
                         .lineLimit(1).truncationMode(.middle)
                         .frame(width: 150, alignment: .leading)
                         .help(entry.name)
-                    ProgressView(value: entry.fraction)
-                        .progressViewStyle(.linear)
-                        .tint(entry.done ? Color.green : theme.accent)
-                        .frame(maxWidth: .infinity)
+                    // Explicit capsule bar instead of a system `ProgressView`. A SwiftUI
+                    // `ProgressView` that is *born full* (an already-complete download when the
+                    // panel first renders — e.g. after reopening the app) ignores the `.tint`
+                    // applied that same frame and falls back to the system accent (blue). Drawing
+                    // the fill color directly guarantees a done bar is always green, whether it
+                    // finished live or was already complete at first paint.
+                    GeometryReader { geo in
+                        let barColor = entry.done ? Color.green : theme.accent
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(barColor.opacity(0.18))
+                            Capsule().fill(barColor)
+                                .frame(width: max(0, geo.size.width * entry.fraction))
+                        }
+                    }
+                    .frame(height: 5)
+                    .frame(maxWidth: .infinity)
                     Text(entry.byteSummary)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(theme.secondaryText)
